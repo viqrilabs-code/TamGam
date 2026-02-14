@@ -1,0 +1,1180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>EduSpark — Architecture & Flowchart</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Fraunces:ital,wght@0,300;0,600;0,900;1,300&display=swap" rel="stylesheet"/>
+<style>
+:root {
+  --bg:       #070A0F;
+  --s1:       #0D1117;
+  --s2:       #131920;
+  --s3:       #1A2332;
+  --border:   rgba(255,255,255,0.06);
+  --text:     #E2E8F0;
+  --muted:    #64748B;
+  --gold:     #F5A623;
+  --gold2:    #FFD84D;
+  --pink:     #E91E8C;
+  --pink2:    #FF7EC7;
+  --blue:     #3B82F6;
+  --blue2:    #93C5FD;
+  --green:    #10B981;
+  --green2:   #6EE7B7;
+  --purple:   #8B5CF6;
+  --purple2:  #C4B5FD;
+  --orange:   #F97316;
+  --red:      #EF4444;
+  --teal:     #14B8A6;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ── NAV ── */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 40px;
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0;
+  background: rgba(7,10,15,0.92);
+  backdrop-filter: blur(16px);
+  z-index: 100;
+}
+.logo {
+  font-family: 'Fraunces', serif;
+  font-size: 22px;
+  font-weight: 900;
+  background: linear-gradient(135deg, var(--gold), var(--pink));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.nav-tabs { display: flex; gap: 4px; }
+.tab {
+  padding: 7px 16px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  background: none;
+  transition: all .2s;
+  font-family: 'JetBrains Mono', monospace;
+}
+.tab.active, .tab:hover {
+  background: var(--s3);
+  color: var(--text);
+  border-color: rgba(255,255,255,0.15);
+}
+
+/* ── SECTIONS ── */
+.section { display: none; padding: 40px; }
+.section.active { display: block; }
+
+/* ── SECTION TITLE ── */
+.sec-title {
+  font-family: 'Fraunces', serif;
+  font-size: 32px;
+  font-weight: 900;
+  margin-bottom: 8px;
+}
+.sec-sub {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 40px;
+}
+
+/* ═══════════════════════════════════
+   ARCHITECTURE DIAGRAM
+═══════════════════════════════════ */
+.arch-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.arch-col { display: flex; flex-direction: column; gap: 12px; }
+
+.arch-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0 4px;
+  margin-bottom: 4px;
+}
+
+.arch-box {
+  border-radius: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  position: relative;
+  transition: transform .2s, border-color .2s;
+  cursor: default;
+}
+.arch-box:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255,255,255,0.15);
+}
+
+.arch-box-title {
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.arch-box-sub {
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.box-blue   { background: rgba(59,130,246,0.08); border-color: rgba(59,130,246,0.25); }
+.box-green  { background: rgba(16,185,129,0.08); border-color: rgba(16,185,129,0.25); }
+.box-gold   { background: rgba(245,166,35,0.08); border-color: rgba(245,166,35,0.25); }
+.box-pink   { background: rgba(233,30,140,0.08); border-color: rgba(233,30,140,0.25); }
+.box-purple { background: rgba(139,92,246,0.08); border-color: rgba(139,92,246,0.25); }
+.box-teal   { background: rgba(20,184,166,0.08); border-color: rgba(20,184,166,0.25); }
+.box-orange { background: rgba(249,115,22,0.08); border-color: rgba(249,115,22,0.25); }
+
+.dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  animation: blink 2s ease-in-out infinite;
+}
+@keyframes blink {
+  0%,100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+.dot-blue   { background: var(--blue);   box-shadow: 0 0 6px var(--blue); }
+.dot-green  { background: var(--green);  box-shadow: 0 0 6px var(--green); }
+.dot-gold   { background: var(--gold);   box-shadow: 0 0 6px var(--gold); }
+.dot-pink   { background: var(--pink);   box-shadow: 0 0 6px var(--pink); }
+.dot-purple { background: var(--purple); box-shadow: 0 0 6px var(--purple); }
+.dot-teal   { background: var(--teal);   box-shadow: 0 0 6px var(--teal); }
+.dot-orange { background: var(--orange); box-shadow: 0 0 6px var(--orange); }
+
+/* Arrow connectors */
+.arch-arrows {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 30px;
+}
+.arrow-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--s1);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 16px;
+}
+.arrow-from, .arrow-to {
+  font-size: 11px;
+  font-weight: 600;
+  flex: 1;
+}
+.arrow-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.arrow-line span {
+  width: 40px;
+  height: 1px;
+  background: var(--muted);
+  display: block;
+}
+
+/* ═══════════════════════════════════
+   FLOW DIAGRAMS
+═══════════════════════════════════ */
+.flows-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+.flow-card {
+  background: var(--s1);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+}
+.flow-title {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.flow-title-icon {
+  width: 28px; height: 28px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.flow-step {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 0;
+  position: relative;
+}
+.flow-step:not(:last-child) .step-line {
+  display: block;
+}
+.step-left {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 28px;
+  flex-shrink: 0;
+}
+.step-num {
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.step-line {
+  display: none;
+  width: 1px;
+  flex: 1;
+  min-height: 16px;
+  margin: 4px 0;
+}
+.step-content {
+  padding-bottom: 16px;
+  flex: 1;
+}
+.step-label {
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 3px;
+}
+.step-desc {
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.step-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 10px;
+  margin-top: 4px;
+}
+
+/* ═══════════════════════════════════
+   USER JOURNEY
+═══════════════════════════════════ */
+.journey-wrap {
+  overflow-x: auto;
+  padding-bottom: 16px;
+}
+.journey {
+  display: flex;
+  gap: 0;
+  min-width: 900px;
+}
+.journey-phase {
+  flex: 1;
+  position: relative;
+}
+.journey-phase:not(:last-child)::after {
+  content: '→';
+  position: absolute;
+  right: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: 18px;
+  z-index: 2;
+}
+.phase-header {
+  background: var(--s2);
+  border: 1px solid var(--border);
+  border-radius: 12px 12px 0 0;
+  padding: 12px 14px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  text-align: center;
+}
+.phase-body {
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 12px 12px;
+  padding: 14px;
+  min-height: 160px;
+}
+.phase-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.phase-bullet {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+/* ═══════════════════════════════════
+   AI SYSTEM
+═══════════════════════════════════ */
+.ai-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.ai-card {
+  background: var(--s1);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+  position: relative;
+  overflow: hidden;
+}
+.ai-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+}
+.ai-card.notes::before  { background: linear-gradient(90deg, var(--blue), var(--purple)); }
+.ai-card.assess::before { background: linear-gradient(90deg, var(--gold), var(--orange)); }
+.ai-card.tutor::before  { background: linear-gradient(90deg, var(--pink), var(--purple)); }
+
+.ai-card-title {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ai-card-model {
+  font-size: 9px;
+  color: var(--muted);
+  margin-bottom: 14px;
+  font-style: italic;
+}
+.ai-step {
+  font-size: 10px;
+  color: #94A3B8;
+  padding: 6px 10px;
+  background: var(--s2);
+  border-radius: 6px;
+  margin-bottom: 6px;
+  border-left: 2px solid;
+  line-height: 1.5;
+}
+
+.level-bar {
+  display: flex;
+  gap: 6px;
+  margin: 12px 0;
+}
+.level-seg {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  position: relative;
+}
+.level-seg span {
+  position: absolute;
+  bottom: -16px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 8px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* ═══════════════════════════════════
+   COST TABLE
+═══════════════════════════════════ */
+.cost-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-bottom: 24px;
+}
+.cost-table th {
+  text-align: left;
+  padding: 10px 16px;
+  background: var(--s2);
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+}
+.cost-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.cost-table tr:hover td { background: var(--s1); }
+.cost-table tr:last-child td { border-bottom: none; }
+
+.pill {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 10px;
+  font-weight: 700;
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">EduSpark</div>
+  <div class="nav-tabs">
+    <button class="tab active" onclick="show('arch')">Architecture</button>
+    <button class="tab" onclick="show('flows')">Flowcharts</button>
+    <button class="tab" onclick="show('journey')">User Journeys</button>
+    <button class="tab" onclick="show('ai')">AI System</button>
+    <button class="tab" onclick="show('costs')">Cost Model</button>
+  </div>
+</header>
+
+<!-- ═══ ARCHITECTURE ═══ -->
+<div class="section active" id="arch">
+  <div class="sec-title">System Architecture</div>
+  <div class="sec-sub">Full GCP infrastructure · asia-south1 (Mumbai) · All components</div>
+
+  <!-- Layer 1: Users -->
+  <div class="arch-label">① USER LAYER</div>
+  <div class="arch-grid" style="margin-bottom:12px;">
+    <div class="arch-box box-blue">
+      <div class="arch-box-title"><span class="dot dot-blue"></span>Student Browser</div>
+      <div class="arch-box-sub">Alpine.js static frontend · Firebase Hosting CDN · WebSocket for community · REST API calls</div>
+    </div>
+    <div class="arch-box box-gold">
+      <div class="arch-box-title"><span class="dot dot-gold"></span>Teacher Browser</div>
+      <div class="arch-box-sub">Dashboard · Class management · Notes review · Student analytics · Document upload</div>
+    </div>
+    <div class="arch-box box-pink">
+      <div class="arch-box-title"><span class="dot dot-pink"></span>Anonymous Visitor</div>
+      <div class="arch-box-sub">Community read-only · Public teacher profiles · Signup nudge on interaction · No API auth needed</div>
+    </div>
+  </div>
+
+  <!-- Layer 2: CDN -->
+  <div class="arch-label" style="margin-top:20px;">② STATIC / CDN LAYER</div>
+  <div class="arch-grid" style="grid-template-columns:1fr 2fr; margin-bottom:12px;">
+    <div class="arch-box box-teal">
+      <div class="arch-box-title"><span class="dot dot-teal"></span>Firebase Hosting</div>
+      <div class="arch-box-sub">Global CDN · Free SSL · Static HTML + Alpine.js + Tailwind · Deploy via Cloud Build</div>
+    </div>
+    <div class="arch-box box-green">
+      <div class="arch-box-title"><span class="dot dot-green"></span>Google Meet (Google Workspace Business Standard)</div>
+      <div class="arch-box-sub">Live class video · Audio · Screen share · Auto-transcript to Google Drive · No custom video infra needed</div>
+    </div>
+  </div>
+
+  <!-- Layer 3: API -->
+  <div class="arch-label" style="margin-top:20px;">③ API LAYER</div>
+  <div class="arch-grid" style="grid-template-columns:2fr 1fr; margin-bottom:12px;">
+    <div class="arch-box box-blue">
+      <div class="arch-box-title"><span class="dot dot-blue"></span>Cloud Run — FastAPI (Python 3.12)</div>
+      <div class="arch-box-sub">Serverless · Scales to zero · min-instances=1 during class hours · REST API + WebSocket · JWT auth · Google OAuth · Razorpay webhooks · CORS · Role-based access control</div>
+    </div>
+    <div class="arch-box box-purple">
+      <div class="arch-box-title"><span class="dot dot-purple"></span>Secret Manager</div>
+      <div class="arch-box-sub">All credentials · DB passwords · API keys · OAuth secrets · No .env in production</div>
+    </div>
+  </div>
+
+  <!-- Layer 4: Data -->
+  <div class="arch-label" style="margin-top:20px;">④ DATA LAYER</div>
+  <div class="arch-grid" style="margin-bottom:12px;">
+    <div class="arch-box box-blue">
+      <div class="arch-box-title"><span class="dot dot-blue"></span>Cloud SQL — PostgreSQL 16</div>
+      <div class="arch-box-sub">All relational data · Users, subscriptions, classes, transcripts, notes, community, assessments · pgvector extension for RAG embeddings · Cloud SQL Auth Proxy · Automated backups</div>
+    </div>
+    <div class="arch-box box-orange">
+      <div class="arch-box-title"><span class="dot dot-orange"></span>Memorystore — Redis</div>
+      <div class="arch-box-sub">WebSocket pub/sub (community real-time) · Session cache · Active connections per channel · Fast leaderboard reads</div>
+    </div>
+    <div class="arch-box box-teal">
+      <div class="arch-box-title"><span class="dot dot-teal"></span>Cloud Storage (GCS)</div>
+      <div class="arch-box-sub">Public bucket: avatars, published assets · Private bucket: teacher verification documents · Transcript backups · Signed URLs for secure doc access</div>
+    </div>
+  </div>
+
+  <!-- Layer 5: Async -->
+  <div class="arch-label" style="margin-top:20px;">⑤ ASYNC PROCESSING LAYER</div>
+  <div class="arch-grid" style="margin-bottom:12px;">
+    <div class="arch-box box-green">
+      <div class="arch-box-title"><span class="dot dot-green"></span>Cloud Tasks</div>
+      <div class="arch-box-sub">Job queue · Transcript processing · Notes generation · Assessment generation · Embedding · Ranking recompute · Built-in retry logic · Guaranteed delivery</div>
+    </div>
+    <div class="arch-box box-purple">
+      <div class="arch-box-title"><span class="dot dot-purple"></span>Cloud Run Jobs (Workers)</div>
+      <div class="arch-box-sub">process_transcript.py · generate_notes.py · generate_assessment.py · embed_content.py (pgvector) · recompute_rankings.py · Runs on demand, zero idle cost</div>
+    </div>
+    <div class="arch-box box-gold">
+      <div class="arch-box-title"><span class="dot dot-gold"></span>Google Drive API</div>
+      <div class="arch-box-sub">Pull transcript (.docx) after class ends · Service account auth · Watches designated folder · Triggers Cloud Task on new file detection</div>
+    </div>
+  </div>
+
+  <!-- Layer 6: AI -->
+  <div class="arch-label" style="margin-top:20px;">⑥ AI LAYER</div>
+  <div class="arch-grid" style="margin-bottom:12px;">
+    <div class="arch-box box-pink">
+      <div class="arch-box-title"><span class="dot dot-pink"></span>Vertex AI — Gemini 2.5 Flash</div>
+      <div class="arch-box-sub">Notes generation · Adaptive assessment questions · AI Tutor responses · Assessment evaluation · Teacher style extraction · Weak area identification</div>
+    </div>
+    <div class="arch-box box-purple">
+      <div class="arch-box-title"><span class="dot dot-purple"></span>Gemini Embeddings (pgvector)</div>
+      <div class="arch-box-sub">text-embedding-004 model · Embed transcript chunks · Embed community posts · Cosine similarity search · Powers AI Tutor RAG · Similar question matching</div>
+    </div>
+    <div class="arch-box box-teal">
+      <div class="arch-box-title"><span class="dot dot-teal"></span>Razorpay</div>
+      <div class="arch-box-sub">Student subscriptions · Payment webhooks → Cloud Run · Subscription status updates → PostgreSQL · GST invoicing · UPI, cards, net banking</div>
+    </div>
+  </div>
+
+  <!-- Layer 7: DevOps -->
+  <div class="arch-label" style="margin-top:20px;">⑦ CI/CD & MONITORING</div>
+  <div class="arch-grid" style="margin-bottom:12px;">
+    <div class="arch-box box-blue">
+      <div class="arch-box-title"><span class="dot dot-blue"></span>Cloud Build</div>
+      <div class="arch-box-sub">Auto trigger on git push → main · Run tests → build Docker image → push Artifact Registry → deploy Cloud Run → run Alembic migrations</div>
+    </div>
+    <div class="arch-box box-green">
+      <div class="arch-box-title"><span class="dot dot-green"></span>Cloud Logging + Monitoring</div>
+      <div class="arch-box-sub">Structured logs from FastAPI · Cloud Run metrics · SQL query performance · Alert policies · Error rate dashboards</div>
+    </div>
+    <div class="arch-box box-orange">
+      <div class="arch-box-title"><span class="dot dot-orange"></span>Artifact Registry</div>
+      <div class="arch-box-sub">Docker images for API + Worker · Image versioning by commit SHA · Region: asia-south1 · Auto-cleanup old images</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ FLOWCHARTS ═══ -->
+<div class="section" id="flows">
+  <div class="sec-title">System Flowcharts</div>
+  <div class="sec-sub">End-to-end flows for every major system process</div>
+
+  <div class="flows-grid">
+
+    <!-- Flow 1: Class → Notes -->
+    <div class="flow-card">
+      <div class="flow-title">
+        <div class="flow-title-icon" style="background:rgba(59,130,246,0.15);">📹</div>
+        Class → AI Notes Pipeline
+      </div>
+      <div class="flow-step">
+        <div class="step-left">
+          <div class="step-num" style="background:rgba(59,130,246,0.2);color:var(--blue);">1</div>
+          <div class="step-line" style="background:var(--blue);opacity:0.3;"></div>
+        </div>
+        <div class="step-content">
+          <div class="step-label">Teacher starts Google Meet class</div>
+          <div class="step-desc">Meet link shared only to subscribed students. Workspace Business Standard auto-enables transcript.</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-left">
+          <div class="step-num" style="background:rgba(59,130,246,0.2);color:var(--blue);">2</div>
+          <div class="step-line" style="background:var(--blue);opacity:0.3;"></div>
+        </div>
+        <div class="step-content">
+          <div class="step-label">Class ends — Meet saves transcript</div>
+          <div class="step-desc">Google Meet auto-saves .docx transcript to teacher's Google Drive designated folder.</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-left">
+          <div class="step-num" style="background:rgba(16,185,129,0.2);color:var(--green);">3</div>
+          <div class="step-line" style="background:var(--green);opacity:0.3;"></div>
+        </div>
+        <div class="step-content">
+          <div class="step-label">Drive API webhook → FastAPI</div>
+          <div class="step-desc">Service account watches Drive folder. New file triggers POST to Cloud Run API.</div>
+          <div class="step-badge" style="background:rgba(16,185,129,0.15);color:var(--green);">Cloud Tasks enqueued</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-left">
+          <div class="step-num" style="background:rgba(16,185,129,0.2);color:var(--green);">4</div>
+          <div class="step-line" style="background:var(--green);opacity:0.3;"></div>
+        </div>
+        <div class="step-content">
+          <div class="step-label">Cloud Run Job pulls transcript</div>
+          <div class="step-desc">process_transcript.py downloads .docx, extracts raw text, stores in PostgreSQL.</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-left">
+          <div class="step-num" style="background:rgba(233,30,140,0.2);color:var(--pink);">5</div>
+          <div class="step-line" style="background:var(--pink);opacity:0.3;"></div>
+        </div>
+        <div class="step-content">
+          <div class="step-label">Gemini generates structured notes</div>
+          <div class="step-desc">Summary · Key points · Detailed notes · Q&A pairs · Topics covered. Saved as draft.</div>
+          <div class="step-badge" style="background:rgba(233,30,140,0.15);color:var(--pink);">Vertex AI — Gemini 2.5 Flash</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-left">
+          <div class="step-num" style="background:rgba(245,166,35,0.2);color:var(--gold);">6</div>
+          <div class="step-line" style="background:var(--gold);opacity:0.3;"></div>
+        </div>
+        <div class="step-content">
+          <div class="step-label">Teacher reviews → Publishes</div>
+          <div class="step-desc">Teacher sees draft in dashboard. Approves or edits. One click to publish.</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-left">
+          <div class="step-num" style="background:rgba(139,92,246,0.2);color:var(--purple);">7</div>
+        </div>
+        <div class="step-content">
+          <div class="step-label">Students notified + content embedded</div>
+          <div class="step-desc">In-app + email notification. Transcript chunked → embedded → stored in pgvector for AI Tutor RAG.</div>
+          <div class="step-badge" style="background:rgba(139,92,246,0.15);color:var(--purple);">RAG ready</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Flow 2: Adaptive Assessment -->
+    <div class="flow-card">
+      <div class="flow-title">
+        <div class="flow-title-icon" style="background:rgba(245,166,35,0.15);">🎯</div>
+        Adaptive Assessment Flow
+      </div>
+      <div class="flow-step">
+        <div class="step-left">
+          <div class="step-num" style="background:rgba(245,166,35,0.2);color:var(--gold);">1</div>
+          <div class="step-line" style="background:var(--gold);opacity:0.3;"></div>
+        </div>
+        <div class="step-content">
+          <div class="step-label">Triggered after notes published</div>
+          <div class="step-desc">Cloud Task queued to generate assessment from class transcript + topics.</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-left">
+          <div class="step-num" style="background:rgba(245,166,35,0.2);color:var(--gold);">2</div>
+          <div class="step-line" style="background:var(--gold);opacity:0.3;"></div>
+        </div>
+        <div class="step-content">
+          <div class="step-label">Gemini generates 8–10 questions</div>
+          <div class="step-desc">40% below standard · 40% at standard · 20% above standard. MCQ + problem solving mix.</div>
+          <div class="step-badge" style="background:rgba(245,166,35,0.15);color:var(--gold);">JSON structured output</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-left">
+          <div class="step-num" style="background:rgba(16,185,129,0.2);color:var(--green);">3</div>
+          <div class="step-line" style="background:var(--green);opacity:0.3;"></div>
+        </div>
+        <div class="step-content">
+          <div class="step-label">Student notified → takes test</div>
+          <div class="step-desc">5-minute adaptive test on student portal. Timed. Hint available once per question.</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-left">
+          <div class="step-num" style="background:rgba(16,185,129,0.2);color:var(--green);">4</div>
+          <div class="step-line" style="background:var(--green);opacity:0.3;"></div>
+        </div>
+        <div class="step-content">
+          <div class="step-label">Scoring matrix applied</div>
+          <div class="step-desc">Below correct: +2pts · Actual correct: +3pts · Above correct: +4pts · Below wrong: strong Level 1 signal.</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-left">
+          <div class="step-num" style="background:rgba(233,30,140,0.2);color:var(--pink);">5</div>
+          <div class="step-line" style="background:var(--pink);opacity:0.3;"></div>
+        </div>
+        <div class="step-content">
+          <div class="step-label">Understanding Level computed (1–5)</div>
+          <div class="step-desc">Level stored in student_understanding_profiles. Topic-level granularity tracked. Weak areas identified.</div>
+          <div class="step-badge" style="background:rgba(233,30,140,0.15);color:var(--pink);">AI Tutor re-calibrated</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-left">
+          <div class="step-num" style="background:rgba(139,92,246,0.2);color:var(--purple);">6</div>
+          <div class="step-line" style="background:var(--purple);opacity:0.3;"></div>
+        </div>
+        <div class="step-content">
+          <div class="step-label">Teacher dashboard updated</div>
+          <div class="step-desc">Class-wide level distribution heatmap. Weak area alerts. "68% struggled with LIATE rule" insight.</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-left">
+          <div class="step-num" style="background:rgba(245,166,35,0.2);color:var(--gold);">7</div>
+        </div>
+        <div class="step-content">
+          <div class="step-label">Level evolves every 3 classes</div>
+          <div class="step-desc">Moving average of last 3 assessments. Level can go up or down. Student notified of changes.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Flow 3: AI Tutor RAG -->
+    <div class="flow-card">
+      <div class="flow-title">
+        <div class="flow-title-icon" style="background:rgba(233,30,140,0.15);">🤖</div>
+        AI Tutor — RAG Flow
+      </div>
+      <div class="flow-step">
+        <div class="step-left">
+          <div class="step-num" style="background:rgba(233,30,140,0.2);color:var(--pink);">1</div>
+          <div class="step-line" style="background:var(--pink);opacity:0.3;"></div>
+        </div>
+        <div class="step-content">
+          <div class="step-label">Student types a question</div>
+          <div class="step-desc">In AI Tutor chat. Optionally scoped to a specific class or subject.</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-left">
+          <div class="step-num" style="background:rgba(233,30,140,0.2);color:var(--pink);">2</div>
+          <div class="step-line" style="background:var(--pink);opacity:0.3;"></div>
+        </div>
+        <div class="step-content">
+          <div class="step-label">Question embedded → vector search</div>
+          <div class="step-desc">Gemini embeddings convert question to vector. pgvector cosine similarity finds top 5 transcript chunks.</div>
+          <div class="step-badge" style="background:rgba(233,30,140,0.15);color:var(--pink);">pgvector — Cloud SQL</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-left">
+          <div class="step-num" style="background:rgba(139,92,246,0.2);color:var(--purple);">3</div>
+          <div class="step-line" style="background:var(--purple);opacity:0.3;"></div>
+        </div>
+        <div class="step-content">
+          <div class="step-label">Student understanding level loaded</div>
+          <div class="step-desc">Level 1–5 from student_understanding_profiles. Topic-specific level if relevant.</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-left">
+          <div class="step-num" style="background:rgba(139,92,246,0.2);color:var(--purple);">4</div>
+          <div class="step-line" style="background:var(--purple);opacity:0.3;"></div>
+        </div>
+        <div class="step-content">
+          <div class="step-label">System prompt constructed</div>
+          <div class="step-desc">Context = retrieved chunks. Persona = level-tuned tutor. Grounded in class content only.</div>
+          <div class="step-badge" style="background:rgba(139,92,246,0.15);color:var(--purple);">Level 1: simple analogies · Level 5: peer-level</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-left">
+          <div class="step-num" style="background:rgba(16,185,129,0.2);color:var(--green);">5</div>
+          <div class="step-line" style="background:var(--green);opacity:0.3;"></div>
+        </div>
+        <div class="step-content">
+          <div class="step-label">Gemini generates grounded answer</div>
+          <div class="step-desc">Uses ONLY class content. References teacher's exact examples. Hints not direct answers.</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-left">
+          <div class="step-num" style="background:rgba(16,185,129,0.2);color:var(--green);">6</div>
+        </div>
+        <div class="step-content">
+          <div class="step-label">Response + source citations returned</div>
+          <div class="step-desc">Answer shown with "From class on [date]" source links. Conversation saved to tutor_sessions.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Flow 4: Subscription + Access -->
+    <div class="flow-card">
+      <div class="flow-title">
+        <div class="flow-title-icon" style="background:rgba(16,185,129,0.15);">💳</div>
+        Subscription & Access Flow
+      </div>
+      <div class="flow-step">
+        <div class="step-left">
+          <div class="step-num" style="background:rgba(16,185,129,0.2);color:var(--green);">1</div>
+          <div class="step-line" style="background:var(--green);opacity:0.3;"></div>
+        </div>
+        <div class="step-content">
+          <div class="step-label">User signs up (free)</div>
+          <div class="step-desc">Email or Google OAuth. Instant access to community posting. No credit card needed.</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-left">
+          <div class="step-num" style="background:rgba(16,185,129,0.2);color:var(--green);">2</div>
+          <div class="step-line" style="background:var(--green);opacity:0.3;"></div>
+        </div>
+        <div class="step-content">
+          <div class="step-label">Selects plan → Razorpay checkout</div>
+          <div class="step-desc">Basic ₹499 · Standard ₹999 · Pro ₹1,499. UPI / cards / net banking. GST invoice auto-generated.</div>
+          <div class="step-badge" style="background:rgba(16,185,129,0.15);color:var(--green);">Razorpay Subscriptions API</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-left">
+          <div class="step-num" style="background:rgba(59,130,246,0.2);color:var(--blue);">3</div>
+          <div class="step-line" style="background:var(--blue);opacity:0.3;"></div>
+        </div>
+        <div class="step-content">
+          <div class="step-label">Webhook → FastAPI → DB update</div>
+          <div class="step-desc">Razorpay sends payment.captured event. Cloud Run validates signature. subscription.status = active.</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-left">
+          <div class="step-num" style="background:rgba(59,130,246,0.2);color:var(--blue);">4</div>
+          <div class="step-line" style="background:var(--blue);opacity:0.3;"></div>
+        </div>
+        <div class="step-content">
+          <div class="step-label">⭐ Pink star mark activated</div>
+          <div class="step-desc">resolve_user_marks() reads live subscription status. Mark appears on all community posts instantly.</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-left">
+          <div class="step-num" style="background:rgba(245,166,35,0.2);color:var(--gold);">5</div>
+          <div class="step-line" style="background:var(--gold);opacity:0.3;"></div>
+        </div>
+        <div class="step-content">
+          <div class="step-label">Gated features unlocked</div>
+          <div class="step-desc">Meet links visible · AI Notes accessible · AI Tutor enabled · Assessments available.</div>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="step-left">
+          <div class="step-num" style="background:rgba(239,68,68,0.2);color:var(--red);">6</div>
+        </div>
+        <div class="step-content">
+          <div class="step-label">Renewal / Expiry handling</div>
+          <div class="step-desc">Auto-renewal via Razorpay. On failure → grace period → features locked → star removed. Email notification at each step.</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══ USER JOURNEYS ═══ -->
+<div class="section" id="journey">
+  <div class="sec-title">User Journeys</div>
+  <div class="sec-sub">Complete journey maps for each persona on the platform</div>
+
+  <div style="margin-bottom:32px;">
+    <div style="font-size:11px;font-weight:700;color:var(--blue2);margin-bottom:16px;letter-spacing:1px;">👨‍🎓 STUDENT JOURNEY</div>
+    <div class="journey-wrap">
+      <div class="journey">
+        <div class="journey-phase">
+          <div class="phase-header" style="color:var(--muted);">Discovery</div>
+          <div class="phase-body">
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--muted);"></div>Finds platform via Google / word of mouth</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--muted);"></div>Browses community (no login)</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--muted);"></div>Reads teacher profile + top performers</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--muted);"></div>Sees value — clicks to join</div>
+          </div>
+        </div>
+        <div class="journey-phase">
+          <div class="phase-header" style="color:var(--green2);">Free Signup</div>
+          <div class="phase-body">
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--green);"></div>Google OAuth — 1 click signup</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--green);"></div>Can post in community</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--green);"></div>Sees locked class content</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--green);"></div>Upgrade nudge shown</div>
+          </div>
+        </div>
+        <div class="journey-phase">
+          <div class="phase-header" style="color:var(--blue2);">Subscribe ⭐</div>
+          <div class="phase-body">
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--blue);"></div>Selects plan (₹499–₹1,499)</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--blue);"></div>Razorpay checkout (UPI etc)</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--blue);"></div>Pink star ⭐ appears instantly</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--blue);"></div>Meet links unlocked</div>
+          </div>
+        </div>
+        <div class="journey-phase">
+          <div class="phase-header" style="color:var(--gold2);">Attends Class</div>
+          <div class="phase-body">
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--gold);"></div>Joins Google Meet via platform</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--gold);"></div>Live class with teacher</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--gold);"></div>Notified when notes ready</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--gold);"></div>Reviews AI-generated notes</div>
+          </div>
+        </div>
+        <div class="journey-phase">
+          <div class="phase-header" style="color:var(--pink2);">Assessment 🎯</div>
+          <div class="phase-body">
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--pink);"></div>Takes 5-min adaptive test</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--pink);"></div>Gets understanding level 1–5</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--pink);"></div>Sees weak areas identified</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--pink);"></div>AI Tutor re-calibrated</div>
+          </div>
+        </div>
+        <div class="journey-phase">
+          <div class="phase-header" style="color:var(--purple2);">AI Tutor 🤖</div>
+          <div class="phase-body">
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--purple);"></div>Asks doubts 24/7</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--purple);"></div>Gets level-tuned answers</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--purple);"></div>Grounded in class content</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--purple);"></div>Practice problems generated</div>
+          </div>
+        </div>
+        <div class="journey-phase">
+          <div class="phase-header" style="color:var(--teal);">Growth 📈</div>
+          <div class="phase-body">
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--teal);"></div>Level improves class by class</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--teal);"></div>Badges earned</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--teal);"></div>Appears in top performers</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--teal);"></div>Community reputation grows</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div style="font-size:11px;font-weight:700;color:var(--gold2);margin-bottom:16px;letter-spacing:1px;">👩‍🏫 TEACHER JOURNEY</div>
+    <div class="journey-wrap">
+      <div class="journey">
+        <div class="journey-phase">
+          <div class="phase-header" style="color:var(--muted);">Onboard</div>
+          <div class="phase-body">
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--muted);"></div>Signs up free</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--muted);"></div>Sets role = teacher</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--muted);"></div>Creates public profile</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--muted);"></div>Sets subjects + bio</div>
+          </div>
+        </div>
+        <div class="journey-phase">
+          <div class="phase-header" style="color:var(--gold2);">Get Verified 🟡</div>
+          <div class="phase-body">
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--gold);"></div>Uploads certificate + ID</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--gold);"></div>Admin reviews docs</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--gold);"></div>Golden T mark activated</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--gold);"></div>Credibility established</div>
+          </div>
+        </div>
+        <div class="journey-phase">
+          <div class="phase-header" style="color:var(--blue2);">Schedule Class</div>
+          <div class="phase-body">
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--blue);"></div>Creates class in dashboard</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--blue);"></div>Sets Meet link + schedule</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--blue);"></div>Students notified</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--blue);"></div>Meet link auto-shared</div>
+          </div>
+        </div>
+        <div class="journey-phase">
+          <div class="phase-header" style="color:var(--green2);">Post Class</div>
+          <div class="phase-body">
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--green);"></div>Transcript auto-captured</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--green);"></div>AI notes generated</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--green);"></div>Reviews + publishes notes</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--green);"></div>Assessment auto-created</div>
+          </div>
+        </div>
+        <div class="journey-phase">
+          <div class="phase-header" style="color:var(--pink2);">Insights 📊</div>
+          <div class="phase-body">
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--pink);"></div>Sees level distribution</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--pink);"></div>Weak area alerts</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--pink);"></div>Top performers updated</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--pink);"></div>Plans next class better</div>
+          </div>
+        </div>
+        <div class="journey-phase">
+          <div class="phase-header" style="color:var(--purple2);">Earn 💰</div>
+          <div class="phase-body">
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--purple);"></div>Students subscribe</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--purple);"></div>Commission tracked live</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--purple);"></div>Monthly payout</div>
+            <div class="phase-item"><div class="phase-bullet" style="background:var(--purple);"></div>10–20% commission</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ AI SYSTEM ═══ -->
+<div class="section" id="ai">
+  <div class="sec-title">AI System Design</div>
+  <div class="sec-sub">Three AI components · Vertex AI Gemini 2.5 Flash · pgvector RAG · Adaptive levels</div>
+
+  <div class="ai-grid">
+    <div class="ai-card notes">
+      <div class="ai-card-title">📝 Notes Generation</div>
+      <div class="ai-card-model">Vertex AI — Gemini 2.5 Flash · ~15K tokens input · ~3K output · ₹1/class</div>
+      <div class="ai-step" style="border-color:var(--blue);">① Raw transcript text (from Google Drive)</div>
+      <div class="ai-step" style="border-color:var(--blue);">② Structured prompt with class level + subject context</div>
+      <div class="ai-step" style="border-color:var(--blue);">③ JSON output: summary · key_points · detailed_notes · qa_pairs · topics</div>
+      <div class="ai-step" style="border-color:var(--blue);">④ Saved as draft → teacher reviews → published</div>
+      <div class="ai-step" style="border-color:var(--purple);">⑤ Content chunked (500 tokens) → embedded → pgvector</div>
+    </div>
+
+    <div class="ai-card assess">
+      <div class="ai-card-title">🎯 Adaptive Assessment</div>
+      <div class="ai-card-model">Vertex AI — Gemini 2.5 Flash · ~3K tokens · ₹0.13/student/class</div>
+      <div class="ai-step" style="border-color:var(--gold);">① Topics from notes + class level as input</div>
+      <div class="ai-step" style="border-color:var(--gold);">② Generates 8–10 questions with difficulty bands</div>
+      <div style="margin:10px 0;">
+        <div style="font-size:9px;color:var(--muted);margin-bottom:6px;">QUESTION DISTRIBUTION</div>
+        <div class="level-bar">
+          <div class="level-seg" style="background:rgba(16,185,129,0.4);flex:2;"><span>40% Below</span></div>
+          <div class="level-seg" style="background:rgba(59,130,246,0.4);flex:2;"><span>40% Actual</span></div>
+          <div class="level-seg" style="background:rgba(233,30,140,0.4);"><span>20% Above</span></div>
+        </div>
+        <div style="height:20px;"></div>
+      </div>
+      <div class="ai-step" style="border-color:var(--gold);">③ Scoring: below +2 · actual +3 · above +4 pts</div>
+      <div class="ai-step" style="border-color:var(--orange);">④ Level 1–5 computed → student_understanding_profiles updated</div>
+      <div class="ai-step" style="border-color:var(--orange);">⑤ Teacher heatmap + weak area alerts generated</div>
+    </div>
+
+    <div class="ai-card tutor">
+      <div class="ai-card-title">🤖 AI Tutor (RAG)</div>
+      <div class="ai-card-model">Vertex AI — Gemini 2.5 Flash · pgvector · ₹0.17/question · ~₹2,500/month at 50 students</div>
+      <div class="ai-step" style="border-color:var(--pink);">① Student question → Gemini embedding → vector</div>
+      <div class="ai-step" style="border-color:var(--pink);">② pgvector cosine search → top 5 transcript chunks</div>
+      <div class="ai-step" style="border-color:var(--purple);">③ Load student level (1–5) from profile</div>
+      <div style="margin:10px 0;">
+        <div style="font-size:9px;color:var(--muted);margin-bottom:6px;">TUTOR PERSONA BY LEVEL</div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <div style="display:flex;gap:8px;align-items:center;">
+            <div style="width:14px;height:14px;border-radius:3px;background:rgba(16,185,129,0.5);font-size:8px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;">1</div>
+            <div style="font-size:9px;color:var(--muted);">Patient · analogies · micro-steps · real-world</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <div style="width:14px;height:14px;border-radius:3px;background:rgba(59,130,246,0.5);font-size:8px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;">3</div>
+            <div style="font-size:9px;color:var(--muted);">Standard · worked examples · conceptual WHY</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <div style="width:14px;height:14px;border-radius:3px;background:rgba(233,30,140,0.5);font-size:8px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;">5</div>
+            <div style="font-size:9px;color:var(--muted);">Peer-level · proofs · edge cases · competitive</div>
+          </div>
+        </div>
+      </div>
+      <div class="ai-step" style="border-color:var(--pink);">④ Gemini answers using ONLY class content chunks</div>
+      <div class="ai-step" style="border-color:var(--purple);">⑤ Response + source citations + session saved</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ COSTS ═══ -->
+<div class="section" id="costs">
+  <div class="sec-title">Cost & Pricing Model</div>
+  <div class="sec-sub">GCP asia-south1 · Break-even at 14 students · Profitable from day one</div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:32px;">
+
+    <div>
+      <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:1px;margin-bottom:14px;">GCP MONTHLY COSTS</div>
+      <table class="cost-table">
+        <thead><tr><th>Service</th><th>Config</th><th>INR/month</th></tr></thead>
+        <tbody>
+          <tr><td>Cloud Run (API)</td><td>Serverless, scales to 0</td><td style="color:var(--green);">₹1,260</td></tr>
+          <tr><td>Cloud SQL</td><td>db-g1-small, 10GB SSD</td><td style="color:var(--orange);">₹2,100</td></tr>
+          <tr><td>Memorystore</td><td>Redis 1GB Basic</td><td style="color:var(--orange);">₹1,850</td></tr>
+          <tr><td>Cloud Storage</td><td>20GB multi-region</td><td style="color:var(--green);">₹85</td></tr>
+          <tr><td>Vertex AI (notes)</td><td>20 classes/mo</td><td style="color:var(--green);">₹20</td></tr>
+          <tr><td>AI Tutor (50 students)</td><td>10 Q/day avg</td><td style="color:var(--blue);">₹2,500</td></tr>
+          <tr><td>Assessments</td><td>50 students × 20 classes</td><td style="color:var(--green);">₹125</td></tr>
+          <tr><td>Google Workspace</td><td>Business Standard</td><td style="color:var(--orange);">₹1,010</td></tr>
+          <tr><td>Cloud Build + misc</td><td>Free tier + extras</td><td style="color:var(--green);">₹50</td></tr>
+          <tr style="font-weight:700;"><td colspan="2">Total (50 students)</td><td style="color:var(--gold);">₹9,000</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div>
+      <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:1px;margin-bottom:14px;">STUDENT PRICING PLANS</div>
+      <table class="cost-table">
+        <thead><tr><th>Plan</th><th>Monthly</th><th>Annual</th></tr></thead>
+        <tbody>
+          <tr><td><span class="pill" style="background:var(--s2);color:var(--muted);">Free</span></td><td>₹0</td><td>₹0</td></tr>
+          <tr><td><span class="pill" style="background:rgba(16,185,129,0.15);color:var(--green);">Basic ⭐</span></td><td>₹499</td><td>₹4,788</td></tr>
+          <tr><td><span class="pill" style="background:rgba(59,130,246,0.15);color:var(--blue);">Standard ⭐</span></td><td>₹999</td><td>₹9,588</td></tr>
+          <tr><td><span class="pill" style="background:rgba(245,166,35,0.15);color:var(--gold);">Pro ⭐</span></td><td>₹1,499</td><td>₹14,388</td></tr>
+        </tbody>
+      </table>
+
+      <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:1px;margin:20px 0 14px;">UNIT ECONOMICS (50 STUDENTS)</div>
+      <table class="cost-table">
+        <thead><tr><th>Item</th><th>Amount</th></tr></thead>
+        <tbody>
+          <tr><td>Gross Revenue</td><td style="color:var(--green);">₹30,950</td></tr>
+          <tr><td>GCP Infrastructure</td><td style="color:var(--red);">-₹9,000</td></tr>
+          <tr><td>Razorpay (2%)</td><td style="color:var(--red);">-₹619</td></tr>
+          <tr><td>GST (18%)</td><td style="color:var(--red);">-₹5,571</td></tr>
+          <tr style="font-weight:700;"><td>Net Profit</td><td style="color:var(--gold);">~₹15,760</td></tr>
+          <tr><td>Margin</td><td style="color:var(--gold);">~51%</td></tr>
+          <tr><td>Break-even point</td><td style="color:var(--green);">14 students</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:1px;margin-bottom:14px;">SCALE PROJECTIONS</div>
+  <table class="cost-table">
+    <thead><tr><th>Students</th><th>GCP Cost</th><th>Revenue (avg)</th><th>Profit</th><th>Margin</th></tr></thead>
+    <tbody>
+      <tr><td>0 (zero activity)</td><td style="color:var(--orange);">₹5,000</td><td>₹0</td><td style="color:var(--red);">-₹5,000</td><td style="color:var(--red);">—</td></tr>
+      <tr><td>14 (break-even)</td><td>₹6,000</td><td>₹6,000</td><td style="color:var(--muted);">₹0</td><td style="color:var(--muted);">0%</td></tr>
+      <tr><td>50</td><td>₹9,000</td><td>₹30,950</td><td style="color:var(--green);">₹15,760</td><td style="color:var(--green);">51%</td></tr>
+      <tr><td>200</td><td>₹22,000</td><td>₹1,20,000</td><td style="color:var(--green);">₹80,000</td><td style="color:var(--green);">67%</td></tr>
+      <tr><td>500</td><td>₹48,000</td><td>₹3,00,000</td><td style="color:var(--green);">₹2,10,000</td><td style="color:var(--green);">70%</td></tr>
+      <tr><td>1,000</td><td>₹80,000</td><td>₹6,00,000</td><td style="color:var(--gold);">₹4,60,000</td><td style="color:var(--gold);">77%</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<script>
+function show(id) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  event.target.classList.add('active');
+}
+</script>
+</body>
+</html>
