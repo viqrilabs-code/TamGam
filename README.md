@@ -4,11 +4,11 @@
 
 ---
 
-## What is EduSpark?
+## What is TamGam?
 
 TamGam is a subscription-based EdTech platform where teachers conduct live classes on **Google Meet**, and the platform handles everything else — capturing transcripts, generating AI notes, assessing student understanding, and providing a personalised AI tutor that explains concepts at exactly the right level for each student.
 
-The platform does not build video infrastructure. Google Meet handles live classes. EduSpark builds the intelligence layer on top.
+The platform does not build video infrastructure. Google Meet handles live classes. TamGam builds the intelligence layer on top.
 
 ---
 
@@ -254,7 +254,7 @@ Optional verified teacher subscription (₹299–₹799/month) for T mark + adva
 ## Project Structure
 
 ```
-eduspark/
+tamgam/
 ├── app/
 │   ├── main.py                    # FastAPI entry point
 │   ├── api/v1/
@@ -318,8 +318,8 @@ eduspark/
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/yourusername/eduspark.git
-cd eduspark
+git clone https://github.com/yourusername/tamgam.git
+cd tamgam
 
 # 2. Copy environment variables
 cp .env.example .env
@@ -354,7 +354,7 @@ GCP_REGION=asia-south1
 
 # Database (Cloud SQL)
 DB_CONNECTION_NAME=project:region:instance
-DB_NAME=eduspark
+DB_NAME=tamgam
 
 # Google OAuth
 GOOGLE_CLIENT_ID=...
@@ -385,7 +385,7 @@ gcloud config set project YOUR_PROJECT_ID
 git push origin main
 
 # Manual deploy if needed
-gcloud run deploy eduspark-api \
+gcloud run deploy tamgam-api \
   --source . \
   --region asia-south1 \
   --set-cloudsql-instances YOUR_CONNECTION_NAME
