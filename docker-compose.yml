@@ -1,0 +1,72 @@
+# docker-compose.yml
+# Local development environment for TamGam
+
+services:
+
+  # PostgreSQL 16 + pgvector
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: tamgam_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tamgam
+      POSTGRES_PASSWORD: tamgam_pass
+      POSTGRES_DB: tamgam
+    ports:
+      - "5432:5432"
+    volumes:
+      - tamgam_pgdata:/var/lib/postgresql/data
+      - ./infra/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tamgam -d tamgam"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Redis 7
+  redis:
+    image: redis:7-alpine
+    container_name: tamgam_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - tamgam_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # FastAPI
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tamgam_api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://tamgam:tamgam_pass@db:5432/tamgam
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: development
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+      --reload-dir /app/app
+
+volumes:
+  tamgam_pgdata:
+  tamgam_redisdata:

@@ -1,0 +1,63 @@
+# TamGam -- requirements.txt
+# Python 3.13 compatible
+# Generated: 2026-02-14
+
+# Web Framework
+fastapi==0.129.0
+uvicorn[standard]==0.34.2
+python-multipart==0.0.20
+
+# Database
+sqlalchemy==2.0.46
+alembic==1.18.4
+psycopg2-binary==2.9.11
+pg8000==1.31.5
+pgvector==0.4.2
+
+# Validation & Settings
+pydantic==2.11.7
+pydantic-settings==2.12.0
+
+# Auth
+python-jose[cryptography]==3.5.0
+passlib[bcrypt]==1.7.4
+authlib==1.6.8
+httpx==0.28.1
+
+# GCP Services
+# NOTE: google-cloud-aiplatform>=1.100.0 requires google-auth>=2.47.0
+# Do NOT pin google-auth separately -- let pip resolve it as a transitive dep
+google-cloud-secret-manager==2.26.0
+google-cloud-storage==3.9.0
+google-cloud-tasks==2.21.0
+google-cloud-aiplatform
+google-auth-httplib2==0.2.0
+
+# AI / Vertex AI
+vertexai
+
+# Google Drive (Transcript Pipeline)
+google-api-python-client==2.170.0
+google-auth-oauthlib==1.2.1
+python-docx
+
+# Cache
+redis==7.1.1
+
+# Payments
+razorpay==2.0.0
+
+# Email
+sendgrid==6.11.0
+pydantic[email]
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+
+# Utilities
+python-dateutil==2.9.0
+pytz==2025.1
+shortuuid==1.0.13
+
+# Testing
+pytest==8.3.5
+pytest-asyncio==0.25.3
