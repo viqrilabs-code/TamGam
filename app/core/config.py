@@ -36,6 +36,7 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str
+    auto_migrate_on_startup: bool = True
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"

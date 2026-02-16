@@ -8,6 +8,8 @@
 from contextlib import asynccontextmanager
 
 import redis as redis_lib
+from alembic import command
+from alembic.config import Config
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -15,6 +17,18 @@ from fastapi.responses import JSONResponse
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.db.session import check_db_connection, engine
+
+
+def run_startup_migrations() -> bool:
+    """Run `alembic upgrade head` using the project alembic.ini."""
+    try:
+        alembic_cfg = Config("alembic.ini")
+        command.upgrade(alembic_cfg, "head")
+        print("Database migrations: OK")
+        return True
+    except Exception as exc:
+        print(f"WARNING: Database migrations failed -- {exc}")
+        return False
 
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
@@ -27,6 +41,10 @@ async def lifespan(app: FastAPI):
     """
     # Startup
     print(f"Starting {settings.app_name} v{settings.app_version} [{settings.app_env}]")
+
+    # Apply DB migrations (development default)
+    if settings.auto_migrate_on_startup:
+        run_startup_migrations()
 
     # Verify DB connection
     if check_db_connection():
