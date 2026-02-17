@@ -1,14 +1,10 @@
 # app/api/v1/endpoints/community.py
-from fastapi import APIRouter
-
-router = APIRouter()
-
-# app/api/v1/endpoints/community.py
 # Community endpoints: channels, posts, replies, reactions
 #
 # Access rules:
-#   Read (GET): anonymous allowed
-#   Write (POST/DELETE): must be logged in
+#   Read (GET): anonymous allowed — offers channel: everyone sees post list,
+#               but full detail requires subscription
+#   Write (POST): must be logged in; offers channel = verified teachers only
 #   Identity marks resolved live on every author field
 
 from datetime import datetime, timezone
@@ -16,7 +12,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_, func
+from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 import app.db.base  # noqa: F401
@@ -53,6 +49,25 @@ def _build_author(user: User, db) -> AuthorInfo:
         is_subscribed=marks["is_subscribed"],
         is_verified_teacher=marks["is_verified_teacher"],
     )
+
+
+def _build_author_blurred(user: User) -> AuthorInfo:
+    """Blurred author for non-subscribed viewers on the offers channel."""
+    return AuthorInfo(
+        id=user.id,
+        full_name="Verified Teacher",
+        avatar_url=None,
+        role=user.role,
+        is_subscribed=False,
+        is_verified_teacher=True,
+    )
+
+
+def _is_subscribed(user: Optional[User], db) -> bool:
+    if not user:
+        return False
+    marks = resolve_user_marks(user, db)
+    return marks["is_subscribed"]
 
 
 def _build_reaction_summaries(
@@ -101,7 +116,7 @@ def _build_reply_response(reply: Reply, author: User, viewer_id, db) -> ReplyRes
     summary="List community channels (public)",
 )
 def list_channels(db: Session = Depends(get_db)):
-    """Public -- list all active community channels."""
+    """Public — list all active community channels."""
     channels = db.query(Channel).filter(Channel.is_active == True).all()
     return [
         ChannelResponse(
@@ -130,27 +145,42 @@ def list_posts(
     viewer: Optional[User] = Depends(get_optional_user),
     db: Session = Depends(get_db),
 ):
-    """Public -- list posts in a channel, newest first."""
+    """
+    Public — list posts in a channel, newest first.
+    Offers channel: everyone sees the post list.
+    Author name and full body are blurred for non-subscribed viewers.
+    """
     channel = db.query(Channel).filter(Channel.id == channel_id).first()
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found.")
+
+    is_offers = getattr(channel, 'teacher_only', False)
+    viewer_subscribed = _is_subscribed(viewer, db)
+    viewer_id = viewer.id if viewer else None
 
     posts = db.query(Post).filter(
         Post.channel_id == channel_id
     ).order_by(Post.created_at.desc()).offset(skip).limit(limit).all()
 
     result = []
-    viewer_id = viewer.id if viewer else None
     for post in posts:
-        author_user = db.query(User).filter(User.id == post.user_id).first()
+        author_user = db.query(User).filter(User.id == post.author_id).first()
         if not author_user:
             continue
+
+        if is_offers and not viewer_subscribed:
+            author_info = _build_author_blurred(author_user)
+            body_preview = post.body[:60] + "… 🔒 Subscribe to read full offer"
+        else:
+            author_info = _build_author(author_user, db)
+            body_preview = post.body[:200] + ("..." if len(post.body) > 200 else "")
+
         result.append(PostSummary(
             id=post.id,
             channel_id=post.channel_id,
             title=post.title or "",
-            body_preview=post.body[:200] + ("..." if len(post.body) > 200 else ""),
-            author=_build_author(author_user, db),
+            body_preview=body_preview,
+            author=author_info,
             reply_count=post.reply_count,
             reactions=_build_reaction_summaries(post.id, None, viewer_id, db),
             created_at=post.created_at,
@@ -171,16 +201,28 @@ def create_post(
     current_user: User = Depends(require_login),
     db: Session = Depends(get_db),
 ):
-    """Create a post in a channel. Must be logged in."""
+    """
+    Create a post in a channel. Must be logged in.
+    Offers channel: only verified teachers can post.
+    Other channels: any logged-in user.
+    """
     channel = db.query(Channel).filter(
         and_(Channel.id == channel_id, Channel.is_active == True)
     ).first()
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found.")
 
+    if getattr(channel, 'teacher_only', False):
+        if current_user.role != 'teacher':
+            raise HTTPException(status_code=403, detail="Only teachers can post in this channel.")
+        from app.models.teacher import TeacherProfile
+        tp = db.query(TeacherProfile).filter(TeacherProfile.user_id == current_user.id).first()
+        if not tp or not tp.is_verified:
+            raise HTTPException(status_code=403, detail="Only verified teachers can post offers.")
+
     post = Post(
         channel_id=channel_id,
-        user_id=current_user.id,
+        author_id=current_user.id,
         title=payload.title,
         body=payload.body,
         reply_count=0,
@@ -212,22 +254,30 @@ def get_post(
     viewer: Optional[User] = Depends(get_optional_user),
     db: Session = Depends(get_db),
 ):
-    """Public -- get full post with all replies and reactions."""
+    """
+    Get full post with replies and reactions.
+    Offers channel: full detail requires subscription.
+    """
     post = db.query(Post).filter(Post.id == post_id).first()
     if not post:
         raise HTTPException(status_code=404, detail="Post not found.")
 
-    author_user = db.query(User).filter(User.id == post.user_id).first()
+    channel = db.query(Channel).filter(Channel.id == post.channel_id).first()
+    is_offers = getattr(channel, 'teacher_only', False) if channel else False
+
+    if is_offers and not _is_subscribed(viewer, db):
+        raise HTTPException(status_code=403, detail="Subscribe to view full offer details.")
+
+    author_user = db.query(User).filter(User.id == post.author_id).first()
     viewer_id = viewer.id if viewer else None
 
-    # Load top-level replies + nested replies
     all_replies = db.query(Reply).filter(
         Reply.post_id == post_id
     ).order_by(Reply.created_at.asc()).all()
 
     reply_responses = []
     for reply in all_replies:
-        reply_author = db.query(User).filter(User.id == reply.user_id).first()
+        reply_author = db.query(User).filter(User.id == reply.author_id).first()
         if not reply_author:
             continue
         reply_responses.append(_build_reply_response(reply, reply_author, viewer_id, db))
@@ -260,9 +310,8 @@ def delete_post(
     post = db.query(Post).filter(Post.id == post_id).first()
     if not post:
         raise HTTPException(status_code=404, detail="Post not found.")
-    if post.user_id != current_user.id and current_user.role != "admin":
+    if post.author_id != current_user.id and current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Cannot delete another user's post.")
-
     db.delete(post)
     db.commit()
     return MessageResponse(message="Post deleted.")
@@ -282,7 +331,7 @@ def create_reply(
     current_user: User = Depends(require_login),
     db: Session = Depends(get_db),
 ):
-    """Reply to a post or to another reply (nested). Must be logged in."""
+    """Reply to a post or reply (nested). Must be logged in."""
     post = db.query(Post).filter(Post.id == post_id).first()
     if not post:
         raise HTTPException(status_code=404, detail="Post not found.")
@@ -296,7 +345,7 @@ def create_reply(
 
     reply = Reply(
         post_id=post_id,
-        user_id=current_user.id,
+        author_id=current_user.id,
         body=payload.body,
         parent_reply_id=payload.parent_reply_id,
     )
@@ -322,10 +371,7 @@ def add_reaction(
     current_user: User = Depends(require_login),
     db: Session = Depends(get_db),
 ):
-    """
-    Add a reaction emoji to a post or reply.
-    Reacting with the same emoji again removes the reaction (toggle).
-    """
+    """React to a post or reply. Same emoji toggles off."""
     post = db.query(Post).filter(Post.id == post_id).first()
     if not post:
         raise HTTPException(status_code=404, detail="Post not found.")
@@ -337,7 +383,6 @@ def add_reaction(
         if not reply:
             raise HTTPException(status_code=404, detail="Reply not found.")
 
-    # Check for existing reaction (toggle)
     existing = db.query(Reaction).filter(
         and_(
             Reaction.user_id == current_user.id,

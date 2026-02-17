@@ -74,6 +74,7 @@ class StudentProfile(Base):
     )
 
     # ── Relationships ─────────────────────────────────────────────────────────
+    tuition_requests = relationship("TuitionRequest", back_populates="student", cascade="all, delete-orphan")
     user = relationship("User", back_populates="student_profile")
     enrollments = relationship(
         "Enrollment", back_populates="student", cascade="all, delete-orphan"

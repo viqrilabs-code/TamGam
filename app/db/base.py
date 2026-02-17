@@ -6,6 +6,7 @@
 #   - app/db/init_db.py     (seeding)
 
 from app.db.base_class import Base  # noqa: F401
+from app.models.tuition_request import TuitionRequest  # noqa: F401
 
 # ── Import all models here so Alembic can detect them ────────────────────────
 # Order matters: parent tables before child tables (foreign key dependencies)

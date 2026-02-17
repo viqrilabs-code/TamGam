@@ -88,6 +88,7 @@ class TeacherProfile(Base):
 
     # ── Relationships ─────────────────────────────────────────────────────────
     user = relationship("User", back_populates="teacher_profile")
+    tuition_requests = relationship("TuitionRequest", back_populates="teacher", cascade="all, delete-orphan")
     verifications = relationship(
         "TeacherVerification", back_populates="teacher", cascade="all, delete-orphan"
     )
@@ -229,6 +230,7 @@ class TopPerformer(Base):
     # ── Relationships ─────────────────────────────────────────────────────────
     teacher = relationship("TeacherProfile", back_populates="top_performers")
     student = relationship("StudentProfile", back_populates="top_performer_entries")
+    
 
     def __repr__(self) -> str:
         return f"<TopPerformer teacher={self.teacher_id} student={self.student_id} rank={self.rank}>"

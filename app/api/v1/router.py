@@ -22,6 +22,7 @@ from app.api.v1.endpoints import (
     notifications,
     admin,
 )
+from app.api.v1.endpoints import tuition_requests
 
 api_router = APIRouter()
 
@@ -58,3 +59,6 @@ api_router.include_router(notifications.router, prefix="/notifications", tags=["
 
 # Admin
 api_router.include_router(admin.router, prefix="/admin", tags=["Admin"])
+
+# Tuition Requests
+api_router.include_router(tuition_requests.router, prefix="/tuition-requests", tags=["Tuition Requests"])
