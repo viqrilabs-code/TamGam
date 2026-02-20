@@ -33,6 +33,13 @@ class TeacherProfilePublic(BaseModel):
     qualifications: Optional[str] = None
     experience_years: Optional[int] = None
     school_or_institution: Optional[str] = None
+    school_name: Optional[str] = None
+    preferred_language: Optional[str] = None
+    teaching_style: Optional[str] = None
+    focus_grades: Optional[List[str]] = None
+    focus_boards: Optional[List[str]] = None
+    class_note_tone: Optional[str] = None
+    class_note_preferences: Optional[str] = None
     is_verified: bool
     total_students: int
     total_classes: int
@@ -62,6 +69,13 @@ class TeacherProfileUpdate(BaseModel):
     qualifications: Optional[str] = None
     experience_years: Optional[int] = None
     school_or_institution: Optional[str] = None
+    school_name: Optional[str] = None
+    preferred_language: Optional[str] = None
+    teaching_style: Optional[str] = None
+    focus_grades: Optional[List[str]] = None
+    focus_boards: Optional[List[str]] = None
+    class_note_tone: Optional[str] = None
+    class_note_preferences: Optional[str] = None
     bank_account_name: Optional[str] = None
     bank_account_number: Optional[str] = None
     bank_ifsc_code: Optional[str] = None
@@ -72,6 +86,20 @@ class TeacherProfileUpdate(BaseModel):
     def valid_experience(cls, v: Optional[int]) -> Optional[int]:
         if v is not None and (v < 0 or v > 60):
             raise ValueError("Experience years must be between 0 and 60")
+        return v
+
+    @field_validator("teaching_style")
+    @classmethod
+    def valid_teaching_style(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in {"lecture", "interactive", "practical", "mixed"}:
+            raise ValueError("Teaching style must be one of: lecture, interactive, practical, mixed")
+        return v
+
+    @field_validator("class_note_tone")
+    @classmethod
+    def valid_class_note_tone(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in {"concise", "detailed", "exam_focused", "conceptual"}:
+            raise ValueError("Class note tone must be one of: concise, detailed, exam_focused, conceptual")
         return v
 
     @field_validator("subjects")

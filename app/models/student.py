@@ -45,6 +45,13 @@ class StudentProfile(Base):
     school_name = Column(String(255), nullable=True)
     city = Column(String(100), nullable=True)
     state = Column(String(100), nullable=True)
+    preferred_language = Column(String(50), nullable=True)
+    learning_style = Column(String(50), nullable=True)       # visual | auditory | reading | kinesthetic
+    target_exam = Column(String(100), nullable=True)         # e.g. CBSE Board, Olympiad
+    strengths = Column(ARRAY(String), nullable=True)          # Subjects/topics student is strong in
+    improvement_areas = Column(ARRAY(String), nullable=True)  # Subjects/topics student needs help in
+    learning_goals = Column(Text, nullable=True)              # Goal statement for Diya personalization
+    weekly_study_hours = Column(Integer, nullable=True)
 
     # ── Performance (public) ──────────────────────────────────────────────────
     # Aggregate score used for teacher's top-performers list

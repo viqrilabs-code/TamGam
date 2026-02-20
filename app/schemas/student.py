@@ -5,7 +5,7 @@ from datetime import date, datetime
 from typing import List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 
 # ── Student Profile ───────────────────────────────────────────────────────────
@@ -17,6 +17,14 @@ class StudentProfilePublic(BaseModel):
     full_name: str
     avatar_url: Optional[str] = None
     grade: Optional[int] = None
+    school_name: Optional[str] = None
+    preferred_language: Optional[str] = None
+    learning_style: Optional[str] = None
+    target_exam: Optional[str] = None
+    strengths: Optional[List[str]] = None
+    improvement_areas: Optional[List[str]] = None
+    learning_goals: Optional[str] = None
+    weekly_study_hours: Optional[int] = None
     performance_score: Optional[float] = None
     badges: Optional[List[str]] = None
     streak_days: int
@@ -27,7 +35,6 @@ class StudentProfilePrivate(StudentProfilePublic):
     date_of_birth: Optional[date] = None
     parent_name: Optional[str] = None
     parent_phone: Optional[str] = None
-    parent_email: Optional[str] = None
     address_city: Optional[str] = None
     address_state: Optional[str] = None
     address_pincode: Optional[str] = None
@@ -39,10 +46,17 @@ class StudentProfilePrivate(StudentProfilePublic):
 class StudentProfileUpdate(BaseModel):
     """Fields a student can update on their own profile."""
     grade: Optional[int] = None
+    school_name: Optional[str] = None
     date_of_birth: Optional[date] = None
     parent_name: Optional[str] = None
     parent_phone: Optional[str] = None
-    parent_email: Optional[str] = None
+    preferred_language: Optional[str] = None
+    learning_style: Optional[str] = None
+    target_exam: Optional[str] = None
+    strengths: Optional[List[str]] = None
+    improvement_areas: Optional[List[str]] = None
+    learning_goals: Optional[str] = None
+    weekly_study_hours: Optional[int] = None
     address_city: Optional[str] = None
     address_state: Optional[str] = None
     address_pincode: Optional[str] = None
@@ -53,6 +67,28 @@ class StudentProfileUpdate(BaseModel):
         if v is not None and v not in range(1, 13):
             raise ValueError("Grade must be between 1 and 12")
         return v
+
+    @field_validator("weekly_study_hours")
+    @classmethod
+    def valid_weekly_study_hours(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and (v < 0 or v > 80):
+            raise ValueError("Weekly study hours must be between 0 and 80")
+        return v
+
+    @field_validator("learning_style")
+    @classmethod
+    def valid_learning_style(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in {"visual", "auditory", "reading", "kinesthetic", "mixed"}:
+            raise ValueError("Learning style must be one of: visual, auditory, reading, kinesthetic, mixed")
+        return v
+
+    @model_validator(mode="after")
+    def normalize_lists(self):
+        if self.strengths is not None:
+            self.strengths = [item.strip() for item in self.strengths if item and item.strip()]
+        if self.improvement_areas is not None:
+            self.improvement_areas = [item.strip() for item in self.improvement_areas if item and item.strip()]
+        return self
 
     @field_validator("address_pincode")
     @classmethod

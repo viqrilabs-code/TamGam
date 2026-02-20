@@ -51,13 +51,20 @@ def _build_private_profile(profile: StudentProfile, user: User, db: Session) -> 
         full_name=user.full_name,
         avatar_url=user.avatar_url,
         grade=profile.grade,
+        school_name=profile.school_name,
+        preferred_language=profile.preferred_language,
+        learning_style=profile.learning_style,
+        target_exam=profile.target_exam,
+        strengths=profile.strengths,
+        improvement_areas=profile.improvement_areas,
+        learning_goals=profile.learning_goals,
+        weekly_study_hours=profile.weekly_study_hours,
         performance_score=profile.performance_score,
         badges=profile.badges,
         streak_days=profile.streak_days,
         date_of_birth=profile.date_of_birth,
         parent_name=profile.parent_name,
         parent_phone=profile.parent_phone,
-        parent_email=None,
         address_city=profile.city,
         address_state=profile.state,
         address_pincode=profile.pincode,
@@ -101,8 +108,13 @@ def update_my_profile(
     profile = _get_student_profile_or_404(current_user.id, db)
 
     update_data = payload.model_dump(exclude_none=True)
+    field_map = {
+        "address_city": "city",
+        "address_state": "state",
+        "address_pincode": "pincode",
+    }
     for field, value in update_data.items():
-        setattr(profile, field, value)
+        setattr(profile, field_map.get(field, field), value)
 
     profile.updated_at = datetime.now(timezone.utc)
     db.commit()
@@ -130,6 +142,14 @@ def get_student_public(student_id: UUID, db: Session = Depends(get_db)):
         full_name=user.full_name,
         avatar_url=user.avatar_url,
         grade=profile.grade,
+        school_name=profile.school_name,
+        preferred_language=profile.preferred_language,
+        learning_style=profile.learning_style,
+        target_exam=profile.target_exam,
+        strengths=profile.strengths,
+        improvement_areas=profile.improvement_areas,
+        learning_goals=profile.learning_goals,
+        weekly_study_hours=profile.weekly_study_hours,
         performance_score=profile.performance_score,
         badges=profile.badges,
         streak_days=profile.streak_days,
