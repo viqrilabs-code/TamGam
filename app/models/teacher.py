@@ -44,6 +44,13 @@ class TeacherProfile(Base):
     qualifications = Column(Text, nullable=True)
     experience_years = Column(Integer, nullable=True)
     school_or_institution = Column(String(255), nullable=True)
+    school_name = Column(String(255), nullable=True)
+    preferred_language = Column(String(50), nullable=True)
+    teaching_style = Column(String(50), nullable=True)       # lecture | interactive | practical | mixed
+    focus_grades = Column(ARRAY(String), nullable=True)      # e.g. ["Class 8", "Class 9"]
+    focus_boards = Column(ARRAY(String), nullable=True)      # e.g. ["CBSE", "ICSE"]
+    class_note_tone = Column(String(50), nullable=True)      # concise | detailed | exam_focused
+    class_note_preferences = Column(Text, nullable=True)      # How notes should be generated
 
     # ── Verification Status ───────────────────────────────────────────────────
     # is_verified = True → 🟡T mark shown on all posts/profile
