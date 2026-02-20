@@ -23,6 +23,7 @@ from app.api.v1.endpoints import (
     admin,
 )
 from app.api.v1.endpoints import tuition_requests
+from app.api.v1.endpoints.admin_books import router as books_router
 
 api_router = APIRouter()
 
@@ -62,3 +63,6 @@ api_router.include_router(admin.router, prefix="/admin", tags=["Admin"])
 
 # Tuition Requests
 api_router.include_router(tuition_requests.router, prefix="/tuition-requests", tags=["Tuition Requests"])
+
+# Admin Books (Content Embeddings)
+api_router.include_router(books_router, prefix="/admin/books", tags=["Admin Books"])

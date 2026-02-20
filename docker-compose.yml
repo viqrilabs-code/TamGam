@@ -51,6 +51,7 @@ services:
       DATABASE_URL: postgresql+psycopg2://tamgam:tamgam_pass@db:5432/tamgam
       REDIS_URL: redis://redis:6379/0
       APP_ENV: development
+
     ports:
       - "8000:8000"
     volumes:

@@ -22,6 +22,7 @@ class ContentEmbedding(Base):
         - Transcript chunks (500 tokens, 50 token overlap)
         - Note sections (each key point + detailed section)
         - Community posts (title + body, for similar question matching)
+        - NCERT textbook chapters (Class 8, 9, 10 Mathematics)
 
     Vector dimensions: 768 (Gemini text-embedding-004)
     Search: cosine similarity via pgvector `<=>` operator
@@ -31,7 +32,8 @@ class ContentEmbedding(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
     # ── Source Reference ──────────────────────────────────────────────────────
-    # Exactly one source FK is set per embedding
+    # At most one source FK is set per embedding.
+    # ncert_book rows have all three FKs as NULL — metadata is in ncert_* columns.
     transcript_id = Column(
         UUID(as_uuid=True),
         ForeignKey("transcripts.id", ondelete="CASCADE"),
@@ -52,24 +54,44 @@ class ContentEmbedding(Base):
     )
 
     # ── Class Context ─────────────────────────────────────────────────────────
-    # Denormalised for fast filtering by class without joins
+    # Denormalised for fast filtering by class without joins.
+    # NULL for ncert_book rows (not tied to any specific TamGam class).
     class_id = Column(
         UUID(as_uuid=True),
         ForeignKey("classes.id", ondelete="CASCADE"),
         nullable=True,
         index=True,
     )
+    book_id = Column(
+    UUID(as_uuid=True),
+    ForeignKey("books.id", ondelete="CASCADE"),
+    nullable=True,
+    index=True,
+    )
     subject = Column(String(100), nullable=True, index=True)
 
     # ── Content ───────────────────────────────────────────────────────────────
     content_type = Column(
-        Enum("transcript_chunk", "note_section", "community_post", name="embedding_content_type_enum"),
+        Enum(
+            "transcript_chunk",
+            "note_section",
+            "community_post",
+            "ncert_book",
+            name="embedding_content_type_enum",
+        ),
         nullable=False,
         index=True,
     )
     chunk_text = Column(Text, nullable=False)                 # The text that was embedded
     chunk_index = Column(Integer, nullable=True)              # Position in source document
     token_count = Column(Integer, nullable=True)
+
+    # ── NCERT Metadata ────────────────────────────────────────────────────────
+    # Only populated when content_type = 'ncert_book'.
+    # Enables grade-scoped RAG: search only Class 9 material for a Grade 9 student.
+    ncert_grade = Column(Integer, nullable=True, index=True)          # 8 | 9 | 10
+    ncert_chapter = Column(String(200), nullable=True)                # e.g. "Polynomials"
+    ncert_chapter_num = Column(Integer, nullable=True)                # 1-based chapter number
 
     # ── Vector ────────────────────────────────────────────────────────────────
     # 768-dimensional embedding from Gemini text-embedding-004
@@ -86,6 +108,12 @@ class ContentEmbedding(Base):
     note = relationship("Note", back_populates="embeddings")
 
     def __repr__(self) -> str:
+        if self.content_type == "ncert_book":
+            return (
+                f"<ContentEmbedding type=ncert_book "
+                f"grade={self.ncert_grade} ch={self.ncert_chapter_num} "
+                f"chunk={self.chunk_index}>"
+            )
         return (
             f"<ContentEmbedding type={self.content_type} "
             f"class={self.class_id} chunk={self.chunk_index}>"

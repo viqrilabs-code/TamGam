@@ -5,6 +5,8 @@
 # Shutdown: Clean connection pool disposal
 # Routes:   /health, /api/v1/* (all endpoints via master router)
 
+import logging
+import sys
 from contextlib import asynccontextmanager
 
 import redis as redis_lib
@@ -17,6 +19,24 @@ from fastapi.responses import JSONResponse
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.db.session import check_db_connection, engine
+
+# ── Logging Setup ─────────────────────────────────────────────────────────────
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+    datefmt="%H:%M:%S",
+    handlers=[logging.StreamHandler(sys.stdout)],
+    force=True,  # Override any existing logging configuration (important for Cloud Run)
+)
+# Show DEBUG logs for our own modules
+logging.getLogger("tamgam").setLevel(logging.DEBUG)
+# Quiet down noisy third-party loggers
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+logger = logging.getLogger("tamgam.main")
 
 
 def run_startup_migrations() -> bool:
@@ -31,7 +51,7 @@ def run_startup_migrations() -> bool:
         return False
 
 
-# ── Lifespan ──────────────────────────────────────────────────────────────────
+# â”€â”€ Lifespan â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -68,7 +88,7 @@ async def lifespan(app: FastAPI):
     engine.dispose()
 
 
-# ── App Instance ──────────────────────────────────────────────────────────────
+# â”€â”€ App Instance â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 app = FastAPI(
     title=settings.app_name,
@@ -85,23 +105,23 @@ app = FastAPI(
 )
 
 
-# ── CORS ──────────────────────────────────────────────────────────────────────
+# â”€â”€ CORS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,#["http://localhost:3000", "http://127.0.0.1:3000"]
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],#settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ── Routes ────────────────────────────────────────────────────────────────────
+# â”€â”€ Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 # All API routes under /api/v1
 app.include_router(api_router, prefix="/api/v1")
 
 
-# ── Health Check ──────────────────────────────────────────────────────────────
+# â”€â”€ Health Check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @app.get("/health", tags=["Health"], include_in_schema=False)
 def health_check():
@@ -134,9 +154,6 @@ def health_check():
             },
         },
     )
-
-
-# ── Root Redirect ─────────────────────────────────────────────────────────────
 
 @app.get("/", include_in_schema=False)
 def root():

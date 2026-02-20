@@ -71,8 +71,13 @@ class Settings(BaseSettings):
     # Vertex AI / Gemini
     vertex_ai_location: str = "asia-south1"
     gemini_model: str = "gemini-2.5-flash"
-    embedding_model: str = "text-embedding-004"
+    embedding_model: str = "text-embedding-001"
     embedding_dimensions: int = 768
+    gemini_api_key_1: str = ""
+    gemini_api_key_2: str = ""
+    gemini_api_key_3: str = ""
+    gemini_api_key_4: str = ""
+    gemini_api_key_5: str = ""
 
     # Razorpay
     razorpay_key_id: str = ""

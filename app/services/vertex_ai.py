@@ -9,19 +9,66 @@
 # Embeddings: text-embedding-004 (768 dimensions, matches pgvector schema)
 
 import json
+import os
 import re
 from typing import Optional
 
 from app.core.config import settings
 
 
+def _get_credentials():
+    """
+    Get Google credentials from environment.
+    Returns google.auth.credentials.Credentials object or None.
+    """
+    # Try GOOGLE_APPLICATION_CREDENTIALS_JSON first
+    creds_json_str = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+    if creds_json_str:
+        try:
+            from google.oauth2.credentials import Credentials
+            creds_dict = json.loads(creds_json_str)
+            return Credentials(
+                token=None,
+                refresh_token=creds_dict.get("refresh_token"),
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=creds_dict.get("client_id"),
+                client_secret=creds_dict.get("client_secret"),
+                quota_project_id=creds_dict.get("quota_project_id"),
+            )
+        except Exception as e:
+            print(f"Failed to load credentials from JSON env var: {e}")
+    
+    # Try service account file
+    if settings.google_service_account_key_path:
+        try:
+            from google.oauth2 import service_account
+            return service_account.Credentials.from_service_account_file(
+                settings.google_service_account_key_path
+            )
+        except Exception as e:
+            print(f"Failed to load service account: {e}")
+    
+    # Fall back to Application Default Credentials
+    try:
+        import google.auth
+        credentials, project = google.auth.default()
+        return credentials
+    except Exception:
+        return None
+
+
 def _get_vertex_client():
     """
-    Initialize Vertex AI client.
+    Initialize Vertex AI client with explicit credentials.
     Returns None in dev mode if GCP not configured.
     """
-    if not settings.gcp_project_id or not settings.google_service_account_key_path:
+    if not settings.gcp_project_id:
         return None
+    
+    credentials = _get_credentials()
+    if not credentials:
+        return None
+    
     try:
         import vertexai
         from vertexai.generative_models import GenerativeModel
@@ -29,9 +76,11 @@ def _get_vertex_client():
         vertexai.init(
             project=settings.gcp_project_id,
             location=settings.vertex_ai_location,
+            credentials=credentials,
         )
         return GenerativeModel(settings.gemini_model)
-    except Exception:
+    except Exception as e:
+        print(f"Vertex AI initialization failed: {e}")
         return None
 
 
@@ -133,6 +182,13 @@ def generate_embedding(text: str) -> Optional[list]:
 
     Returns list of 768 floats or None if generation fails.
     """
+    if not settings.gcp_project_id:
+        return None
+    
+    credentials = _get_credentials()
+    if not credentials:
+        return None
+    
     try:
         import vertexai
         from vertexai.language_models import TextEmbeddingModel
@@ -140,6 +196,7 @@ def generate_embedding(text: str) -> Optional[list]:
         vertexai.init(
             project=settings.gcp_project_id,
             location=settings.vertex_ai_location,
+            credentials=credentials,
         )
         model = TextEmbeddingModel.from_pretrained(settings.embedding_model)
         embeddings = model.get_embeddings([text])

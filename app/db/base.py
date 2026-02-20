@@ -6,6 +6,7 @@
 #   - app/db/init_db.py     (seeding)
 
 from app.db.base_class import Base  # noqa: F401
+from app.models.book import Book  # noqa
 from app.models.tuition_request import TuitionRequest  # noqa: F401
 
 # ── Import all models here so Alembic can detect them ────────────────────────
