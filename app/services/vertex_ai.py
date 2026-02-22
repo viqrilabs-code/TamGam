@@ -9,11 +9,14 @@
 # Embeddings: text-embedding-004 (768 dimensions, matches pgvector schema)
 
 import json
+import logging
 import os
 import re
 from typing import Optional
 
 from app.core.config import settings
+
+logger = logging.getLogger("tamgam.vertex_ai")
 
 
 def _get_credentials():
@@ -36,7 +39,7 @@ def _get_credentials():
                 quota_project_id=creds_dict.get("quota_project_id"),
             )
         except Exception as e:
-            print(f"Failed to load credentials from JSON env var: {e}")
+            logger.warning("Failed to load credentials from JSON env var: %s", e)
     
     # Try service account file
     if settings.google_service_account_key_path:
@@ -46,7 +49,7 @@ def _get_credentials():
                 settings.google_service_account_key_path
             )
         except Exception as e:
-            print(f"Failed to load service account: {e}")
+            logger.warning("Failed to load service account: %s", e)
     
     # Fall back to Application Default Credentials
     try:
@@ -80,7 +83,7 @@ def _get_vertex_client():
         )
         return GenerativeModel(settings.gemini_model)
     except Exception as e:
-        print(f"Vertex AI initialization failed: {e}")
+        logger.warning("Vertex AI initialization failed: %s", e)
         return None
 
 
@@ -155,10 +158,10 @@ def generate_notes(transcript_text: str) -> Optional[dict]:
         return json.loads(raw_text)
 
     except json.JSONDecodeError:
-        print("Gemini returned invalid JSON for notes generation")
+        logger.warning("Gemini returned invalid JSON for notes generation")
         return None
     except Exception as e:
-        print(f"Gemini notes generation failed: {e}")
+        logger.exception("Gemini notes generation failed: %s", e)
         return None
 
 
@@ -203,7 +206,7 @@ def generate_embedding(text: str) -> Optional[list]:
         return embeddings[0].values
 
     except Exception as e:
-        print(f"Embedding generation failed: {e}")
+        logger.exception("Embedding generation failed: %s", e)
         return None
 
 

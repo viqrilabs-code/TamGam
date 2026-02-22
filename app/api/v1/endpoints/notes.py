@@ -7,33 +7,334 @@
 #   3. Teacher reviews (approve/reject)
 #   4. Approved notes visible to subscribed students
 
-from datetime import datetime, timezone
+import json
+import logging
+import re
+from datetime import datetime, timedelta, timezone
+from io import BytesIO
+from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from sqlalchemy import and_
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, File, Form, UploadFile
+from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 import app.db.base  # noqa: F401
 from app.core.dependencies import require_login, require_teacher
 from app.db.session import get_db
+from app.models.assessment import StudentUnderstandingProfile
 from app.models.class_ import Class
 from app.models.note import Note
+from app.models.student import StudentProfile
+from app.models.student_note_request import StudentNoteRequest
 from app.models.subscription import Subscription
 from app.models.teacher import TeacherProfile
 from app.models.transcript import Transcript
 from app.models.user import User
 from app.schemas.note import (
-    MessageResponse,
     NoteContent,
     NoteEditRequest,
     NoteResponse,
     NoteReviewRequest,
     QAPair,
+    StudentNotesGenerateResponse,
 )
+from app.services.gemini_key_manager import generate_with_fallback
 from app.services import vertex_ai
 
 router = APIRouter()
+logger = logging.getLogger("tamgam.notes")
+
+MAX_UPLOAD_BYTES = 4 * 1024 * 1024
+ALLOWED_TEXT_EXTENSIONS = {".txt", ".md", ".docx", ".pdf"}
+
+
+def _file_ext(name: str) -> str:
+    lower = (name or "").lower()
+    idx = lower.rfind(".")
+    return lower[idx:] if idx >= 0 else ""
+
+
+async def _read_optional_file(file: Optional[UploadFile]) -> tuple[Optional[str], Optional[str], Optional[int], Optional[bytes]]:
+    if file is None:
+        return None, None, None, None
+    file_name = file.filename or "upload"
+    ext = _file_ext(file_name)
+    if ext not in ALLOWED_TEXT_EXTENSIONS:
+        raise HTTPException(status_code=415, detail="Unsupported file type. Allowed: .txt, .md, .docx, .pdf")
+    file_bytes = await file.read()
+    file_size = len(file_bytes or b"")
+    if file_size == 0:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+    if file_size > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File too large. Max size is 4 MB.")
+    return file_name, file.content_type or "", file_size, file_bytes
+
+
+def _extract_text(file_name: str, file_bytes: bytes) -> str:
+    lower = (file_name or "").lower()
+    if lower.endswith(".txt") or lower.endswith(".md"):
+        try:
+            return file_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            return file_bytes.decode("latin-1", errors="ignore")
+    if lower.endswith(".docx"):
+        try:
+            from docx import Document
+
+            doc = Document(BytesIO(file_bytes))
+            return "\n".join(p.text.strip() for p in doc.paragraphs if p.text and p.text.strip())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Could not parse DOCX file: {exc}") from exc
+    if lower.endswith(".pdf"):
+        try:
+            from pypdf import PdfReader
+
+            reader = PdfReader(BytesIO(file_bytes))
+            pages = []
+            for page in reader.pages:
+                pages.append((page.extract_text() or "").strip())
+            return "\n".join(p for p in pages if p)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Could not parse PDF file: {exc}") from exc
+    raise HTTPException(status_code=415, detail="Unsupported file type.")
+
+
+def _contains_single_chapter(text: str) -> bool:
+    sample = (text or "")[:20000]
+    if not sample.strip():
+        return False
+    heading_pattern = re.compile(r"(?im)^\s*(chapter|lesson)\s*([0-9ivxlcdm]+)?\s*[:.\-]?\s*(.+)?$")
+    headings = []
+    for match in heading_pattern.finditer(sample):
+        num = (match.group(2) or "").strip().lower()
+        title = (match.group(3) or "").strip().lower()
+        headings.append(f"{num}|{title}")
+    headings = [h for h in headings if h.strip("|")]
+    if len(set(headings)) > 1:
+        return False
+
+    chapter_nums = set(re.findall(r"(?i)\b(?:chapter|lesson)\s+([0-9]{1,2})\b", sample))
+    if len(chapter_nums) > 1:
+        return False
+    return True
+
+
+def _student_profile_for_user(user_id: UUID, db: Session) -> Optional[StudentProfile]:
+    return db.query(StudentProfile).filter(StudentProfile.user_id == user_id).first()
+
+
+def _understanding_level_for_subject(student_id: UUID, subject: str, db: Session) -> int:
+    profiles = db.query(StudentUnderstandingProfile).filter(
+        StudentUnderstandingProfile.student_id == student_id
+    ).all()
+    if not profiles:
+        return 3
+    for profile in profiles:
+        if (profile.subject or "").strip().lower() == (subject or "").strip().lower():
+            return int(profile.current_level or 3)
+    for profile in profiles:
+        if (profile.subject or "").strip().lower() == "general":
+            return int(profile.current_level or 3)
+    return int(profiles[0].current_level or 3)
+
+
+def _fallback_personalized_notes(subject: str, standard: int, chapter: str) -> str:
+    return (
+        f"# {subject} - Class {standard} - {chapter}\n\n"
+        "## Exam-Focused Summary\n"
+        "- Explain the chapter in 8-10 crisp points with definitions and laws.\n"
+        "- Add the most frequently asked board-exam statements.\n\n"
+        "## Formula Sheet (with SI units)\n"
+        "- List all important formulas used in this chapter.\n"
+        "- Mention symbol meanings, units, and dimensional hint where useful.\n\n"
+        "## Important Derivations\n"
+        "- Write stepwise derivation outlines likely asked in exams.\n"
+        "- Mention where students lose marks.\n\n"
+        "## Solved Numericals\n"
+        "1. Easy level with all steps and unit conversion.\n"
+        "2. Medium level with exam-style wording and final boxed answer.\n"
+        "3. One higher-order/application question.\n\n"
+        "## Most Common Mistakes\n"
+        "- Wrong units/conversions.\n"
+        "- Sign convention errors.\n"
+        "- Missing formula conditions/assumptions.\n\n"
+        "## Rapid Revision (1-Day Before Exam)\n"
+        "- 10 one-line oral questions.\n"
+        "- 5 short-answer questions.\n"
+        "- 3 long-answer probable questions.\n"
+    )
+
+
+def _generate_personalized_notes(
+    *,
+    subject: str,
+    standard: int,
+    chapter: str,
+    understanding_level: int,
+    weak_sections: list[str],
+    chapter_text: Optional[str],
+    exam_questions_text: Optional[str],
+) -> str:
+    chapter_context = (chapter_text or "").strip()
+    exam_context = (exam_questions_text or "").strip()
+    prompt = f"""
+You are Diya, an expert tutor for Indian school students (CBSE/ICSE/state boards).
+Create HIGH-QUALITY, EXAM-ORIENTED notes for exactly one chapter.
+
+Student metadata:
+- Subject: {subject}
+- Standard: {standard}
+- Chapter/Lesson: {chapter}
+- Understanding level (1-5): {understanding_level}
+- Weak sections: {", ".join(weak_sections) if weak_sections else "none provided"}
+
+Rules:
+- Keep explanation depth aligned to the understanding level.
+- Focus extra on weak sections.
+- If past exam questions are provided, include exam patterns and answer approaches.
+- Cover only this one chapter/lesson, not multiple chapters.
+- Make it directly useful for exams: include definitions, formulas with units, derivations, solved numericals, common mistakes, likely questions, and a final quick-revision checklist.
+- Avoid generic placeholders.
+- Return ONLY JSON with this exact shape:
+{{
+  "notes_markdown": "detailed markdown notes"
+}}
+
+Uploaded chapter content (optional):
+{chapter_context[:14000] if chapter_context else "Not provided. Use textbook knowledge for this chapter."}
+
+Uploaded past exam questions (optional):
+{exam_context[:7000] if exam_context else "Not provided."}
+"""
+    try:
+        raw = generate_with_fallback(prompt, model_name="gemini-2.0-flash")
+        cleaned = (raw or "").strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```[a-zA-Z]*\n?", "", cleaned)
+            cleaned = re.sub(r"\n?```$", "", cleaned).strip()
+
+        notes = ""
+        try:
+            parsed = json.loads(cleaned)
+            notes = str(parsed.get("notes_markdown") or "").strip()
+        except Exception:
+            # If model returned markdown directly, still use it instead of generic fallback.
+            if len(cleaned) > 300:
+                notes = cleaned
+
+        if notes and "Definition of key terms" not in notes:
+            candidate = _clean_notes_markdown(notes)
+            if _notes_quality_ok(candidate, chapter):
+                return candidate
+
+            # Rewrite pass if first output is generic/off-topic.
+            rewrite_prompt = f"""
+Rewrite the following notes into high-quality, exam-oriented notes for:
+- Subject: {subject}
+- Standard: {standard}
+- Chapter: {chapter}
+
+Strict requirements:
+- Chapter-specific only (do not switch chapter).
+- Include: definitions, formula sheet with units, derivations, solved numericals, common mistakes, probable exam questions, quick revision list.
+- Keep markdown structure with H2/H3 headings and bullets.
+- Do not include placeholders.
+
+Draft notes:
+{candidate[:20000]}
+
+Return ONLY JSON:
+{{
+  "notes_markdown": "rewritten markdown notes"
+}}
+"""
+            rewrite_raw = generate_with_fallback(rewrite_prompt, model_name="gemini-2.0-flash")
+            rewrite_clean = (rewrite_raw or "").strip()
+            if rewrite_clean.startswith("```"):
+                rewrite_clean = re.sub(r"^```[a-zA-Z]*\n?", "", rewrite_clean)
+                rewrite_clean = re.sub(r"\n?```$", "", rewrite_clean).strip()
+            rewritten = ""
+            try:
+                rewritten = str(json.loads(rewrite_clean).get("notes_markdown") or "").strip()
+            except Exception:
+                if len(rewrite_clean) > 300:
+                    rewritten = rewrite_clean
+            rewritten = _clean_notes_markdown(rewritten)
+            if _notes_quality_ok(rewritten, chapter):
+                return rewritten
+    except Exception:
+        pass
+    return _fallback_personalized_notes(subject, standard, chapter)
+
+
+def _clean_notes_markdown(notes: str) -> str:
+    """
+    Normalize common LLM/PDF-unfriendly characters and accidental spaced letters.
+    """
+    text = (notes or "").replace("\r\n", "\n").strip()
+    if not text:
+        return text
+
+    # Replace unicode symbols that often break in downstream PDF/copy flows.
+    text = (
+        text.replace("θ", "theta")
+        .replace("¸", "theta")
+        .replace("×", "x")
+        .replace("−", "-")
+        .replace("–", "-")
+        .replace("—", "-")
+    )
+
+    # Collapse patterns like "F o r m u l a" -> "Formula"
+    def _collapse_spaced_letters(match):
+        token = match.group(0)
+        return token.replace(" ", "")
+
+    text = re.sub(r"\b(?:[A-Za-z]\s){3,}[A-Za-z]\b", _collapse_spaced_letters, text)
+
+    # Line-level repair for heavily spaced alphabetic text.
+    repaired_lines = []
+    for line in text.split("\n"):
+        tokens = line.split()
+        alpha_short = 0
+        alpha_total = 0
+        for t in tokens:
+            cleaned = re.sub(r"[^A-Za-z]", "", t)
+            if cleaned:
+                alpha_total += 1
+                if len(cleaned) <= 2:
+                    alpha_short += 1
+        suspicious = alpha_total >= 6 and (alpha_short / max(alpha_total, 1)) >= 0.5
+        if suspicious:
+            line = re.sub(r"(?<=[A-Za-z])\s(?=[A-Za-z])", "", line)
+        repaired_lines.append(line)
+    text = "\n".join(repaired_lines)
+
+    # Remove repeated excessive spaces
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    return text
+
+
+def _notes_quality_ok(notes: str, chapter: str) -> bool:
+    content = (notes or "").strip()
+    if len(content) < 600:
+        return False
+    bad_markers = [
+        "definition of key terms",
+        "main formulae/rules to remember",
+        "start with a direct textbook-style problem",
+        "typical mistakes and how to avoid them",
+    ]
+    low = content.lower()
+    if any(m in low for m in bad_markers):
+        return False
+    chapter_key = re.sub(r"[^a-z0-9 ]", "", (chapter or "").lower()).strip()
+    if chapter_key:
+        # Require chapter keyword presence near the top section.
+        if chapter_key not in re.sub(r"[^a-z0-9 ]", "", low[:2500]):
+            return False
+    return True
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -112,13 +413,143 @@ def _run_generation(note_id: UUID, transcript_text: str, db: Session):
                 cls.notes_status = "failed"
     except Exception as e:
         note.status = "failed"
-        print(f"Notes generation failed: {e}")
+        logger.exception("Notes generation failed: %s", e)
 
     note.updated_at = datetime.now(timezone.utc)
     db.commit()
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
+
+@router.post(
+    "/student/generate",
+    response_model=StudentNotesGenerateResponse,
+    summary="Generate personalized one-chapter notes for student",
+)
+async def generate_student_notes(
+    subject: str = Form(...),
+    standard: int = Form(...),
+    chapter: str = Form(...),
+    chapter_file: UploadFile = File(...),
+    exam_questions_file: Optional[UploadFile] = File(None),
+    current_user: User = Depends(require_login),
+    db: Session = Depends(get_db),
+):
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="Student access only.")
+
+    subject_clean = (subject or "").strip()
+    chapter_clean = (chapter or "").strip()
+    if not subject_clean:
+        raise HTTPException(status_code=422, detail="subject is required.")
+    if not chapter_clean:
+        raise HTTPException(status_code=422, detail="chapter/lesson is required.")
+    if standard < 1 or standard > 12:
+        raise HTTPException(status_code=422, detail="standard must be between 1 and 12.")
+
+    student = _student_profile_for_user(current_user.id, db)
+    if not student:
+        raise HTTPException(status_code=404, detail="Student profile not found.")
+
+    now = datetime.now(timezone.utc)
+    lock_cutoff = now - timedelta(days=7)
+    lock_row = db.query(StudentNoteRequest).filter(
+        and_(
+            StudentNoteRequest.student_id == student.id,
+            func.lower(StudentNoteRequest.subject) == subject_clean.lower(),
+            func.lower(StudentNoteRequest.chapter) == chapter_clean.lower(),
+            StudentNoteRequest.created_at >= lock_cutoff,
+        )
+    ).order_by(StudentNoteRequest.created_at.desc()).first()
+    if lock_row:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Notes for {subject_clean} - {chapter_clean} were already generated recently. "
+                f"Try again after {lock_row.next_allowed_at.isoformat()}."
+            ),
+        )
+
+    chapter_name, _chapter_mime, _chapter_size, chapter_bytes = await _read_optional_file(chapter_file)
+    if chapter_bytes is None:
+        raise HTTPException(status_code=422, detail="chapter_file is required.")
+    exam_name, exam_mime, exam_size, exam_bytes = await _read_optional_file(exam_questions_file)
+
+    chapter_text = None
+    if chapter_bytes:
+        chapter_text = _extract_text(chapter_name or "", chapter_bytes)
+        if not chapter_text.strip():
+            raise HTTPException(status_code=400, detail="Could not extract text from uploaded chapter file.")
+        if not _contains_single_chapter(chapter_text):
+            raise HTTPException(
+                status_code=422,
+                detail="Uploaded chapter file appears to contain multiple chapters/lessons. Upload only one chapter.",
+            )
+
+    exam_text = None
+    if exam_bytes:
+        exam_text = _extract_text(exam_name or "", exam_bytes)
+        if not exam_text.strip():
+            raise HTTPException(status_code=400, detail="Could not extract text from uploaded exam questions file.")
+
+    understanding_level = _understanding_level_for_subject(student.id, subject_clean, db)
+    weak_sections = [w.strip() for w in (student.improvement_areas or []) if isinstance(w, str) and w.strip()]
+
+    request_row = StudentNoteRequest(
+        student_id=student.id,
+        standard=standard,
+        subject=subject_clean,
+        chapter=chapter_clean,
+        chapter_uploaded=1 if chapter_bytes else 0,
+        understanding_level=understanding_level,
+        weak_sections=weak_sections or None,
+        exam_file_name=exam_name,
+        exam_file_mime=exam_mime,
+        exam_file_size_bytes=exam_size,
+        exam_file_bytes=exam_bytes,
+        generation_status="completed",
+        created_at=now,
+        next_allowed_at=now + timedelta(days=7),
+    )
+    db.add(request_row)
+    db.flush()
+
+    notes_markdown = _generate_personalized_notes(
+        subject=subject_clean,
+        standard=standard,
+        chapter=chapter_clean,
+        understanding_level=understanding_level,
+        weak_sections=weak_sections,
+        chapter_text=chapter_text,
+        exam_questions_text=exam_text,
+    )
+    notes_markdown = _clean_notes_markdown(notes_markdown)
+    if not _notes_quality_ok(notes_markdown, chapter_clean):
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Diya could not produce quality notes for this request right now. "
+                "Please upload the chapter PDF and try again."
+            ),
+        )
+
+    db.commit()
+    db.refresh(request_row)
+
+    return StudentNotesGenerateResponse(
+        request_id=request_row.id,
+        subject=subject_clean,
+        standard=standard,
+        chapter=chapter_clean,
+        understanding_level=understanding_level,
+        weak_sections=weak_sections,
+        notes_markdown=notes_markdown,
+        used_uploaded_chapter=chapter_bytes is not None,
+        used_uploaded_exam_questions=exam_bytes is not None,
+        created_at=request_row.created_at,
+        next_allowed_at=request_row.next_allowed_at,
+    )
+
 
 @router.post(
     "/{class_id}/generate",

@@ -8,6 +8,7 @@
 #   4. Student now has active subscription -> features unlocked
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import List
 from uuid import UUID
@@ -17,7 +18,8 @@ from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 import app.db.base  # noqa: F401
-from app.core.dependencies import require_login
+from app.core.config import settings
+from app.core.dependencies import get_effective_active_subscription, require_login
 from app.db.session import get_db
 from app.models.subscription import Payment, Plan, Subscription
 from app.models.user import User
@@ -34,6 +36,28 @@ from app.schemas.subscription import (
 from app.services import razorpay_service
 
 router = APIRouter()
+logger = logging.getLogger("tamgam.subscriptions")
+
+
+def _format_razorpay_error(exc: Exception) -> str:
+    """Return a non-empty readable Razorpay error string."""
+    parts = []
+    message = str(exc).strip()
+    if message:
+        parts.append(message)
+    for attr in ("status_code", "code", "reason", "description", "field"):
+        value = getattr(exc, attr, None)
+        if value not in (None, "", []):
+            parts.append(f"{attr}={value}")
+    args = getattr(exc, "args", None)
+    if args:
+        parts.append(f"args={args!r}")
+    details = getattr(exc, "__dict__", None)
+    if details:
+        parts.append(f"details={details!r}")
+    if parts:
+        return " | ".join(parts)
+    return f"{exc.__class__.__name__}: {repr(exc)}"
 
 
 # ── Plans ─────────────────────────────────────────────────────────────────────
@@ -89,8 +113,9 @@ def get_my_subscription(
         return SubscriptionStatusResponse(is_subscribed=False)
 
     sub, plan = subscription
+    effective_active = get_effective_active_subscription(current_user.id, db)
     return SubscriptionStatusResponse(
-        is_subscribed=sub.status == "active",
+        is_subscribed=effective_active is not None,
         status=sub.status,
         plan_name=plan.name,
         plan_slug=plan.slug,
@@ -123,6 +148,12 @@ def create_subscription(
     Note: Requires RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in .env.
     In development without Razorpay keys, returns a mock response.
     """
+    logger.info(
+        "create_subscription user_id=%s plan_id=%s billing_cycle=%s",
+        current_user.id,
+        payload.plan_id,
+        payload.billing_cycle,
+    )
     # Validate plan
     plan = db.query(Plan).filter(
         and_(Plan.id == payload.plan_id, Plan.is_active == True)
@@ -134,12 +165,7 @@ def create_subscription(
         raise HTTPException(status_code=400, detail="Free plan does not require a subscription.")
 
     # Check no active subscription already
-    existing = db.query(Subscription).filter(
-        and_(
-            Subscription.user_id == current_user.id,
-            Subscription.status == "active",
-        )
-    ).first()
+    existing = get_effective_active_subscription(current_user.id, db)
     if existing:
         raise HTTPException(
             status_code=409,
@@ -169,6 +195,11 @@ def create_subscription(
         )
         db.add(subscription)
         db.commit()
+        logger.info(
+            "create_subscription mock_created user_id=%s subscription_id=%s",
+            current_user.id,
+            subscription.id,
+        )
         return CreateSubscriptionResponse(
             subscription_id=subscription.id,
             razorpay_subscription_id=mock_razorpay_id,
@@ -185,9 +216,15 @@ def create_subscription(
             total_count=total_count,
         )
     except Exception as e:
+        logger.exception(
+            "create_subscription razorpay_failed user_id=%s plan_id=%s error=%s",
+            current_user.id,
+            plan.id,
+            _format_razorpay_error(e),
+        )
         raise HTTPException(
             status_code=502,
-            detail=f"Failed to create Razorpay subscription: {str(e)}",
+            detail=f"Failed to create Razorpay subscription: {_format_razorpay_error(e)}",
         )
 
     subscription = Subscription(
@@ -199,6 +236,12 @@ def create_subscription(
     )
     db.add(subscription)
     db.commit()
+    logger.info(
+        "create_subscription created user_id=%s subscription_id=%s razorpay_subscription_id=%s",
+        current_user.id,
+        subscription.id,
+        rz_sub["id"],
+    )
 
     return CreateSubscriptionResponse(
         subscription_id=subscription.id,
@@ -226,12 +269,8 @@ def cancel_subscription(
     Access remains until current_period_end.
     Sets cancel_at_period_end=True -- Razorpay webhook will set status to cancelled.
     """
-    subscription = db.query(Subscription).filter(
-        and_(
-            Subscription.user_id == current_user.id,
-            Subscription.status == "active",
-        )
-    ).first()
+    logger.info("cancel_subscription user_id=%s", current_user.id)
+    subscription = get_effective_active_subscription(current_user.id, db)
 
     if not subscription:
         raise HTTPException(status_code=404, detail="No active subscription found.")
@@ -240,20 +279,69 @@ def cancel_subscription(
         raise HTTPException(status_code=409, detail="Subscription is already set to cancel.")
 
     # Cancel in Razorpay if real subscription
+    cancelled_via_razorpay = False
+    local_warning = ""
     if subscription.razorpay_subscription_id and not subscription.razorpay_subscription_id.startswith("sub_mock_"):
-        try:
-            razorpay_service.cancel_subscription(
-                subscription.razorpay_subscription_id,
-                cancel_at_cycle_end=True,
+        has_keys = bool(settings.razorpay_key_id and settings.razorpay_key_secret)
+        if not has_keys and settings.app_env == "production":
+            raise HTTPException(
+                status_code=503,
+                detail="Razorpay is not configured on server (missing key id/secret).",
             )
-        except Exception as e:
-            raise HTTPException(status_code=502, detail=f"Failed to cancel with Razorpay: {str(e)}")
+
+        if has_keys:
+            try:
+                logger.info(
+                    "cancel_subscription razorpay_attempt user_id=%s razorpay_subscription_id=%s",
+                    current_user.id,
+                    subscription.razorpay_subscription_id,
+                )
+                razorpay_service.cancel_subscription(
+                    subscription.razorpay_subscription_id,
+                    cancel_at_cycle_end=True,
+                )
+                cancelled_via_razorpay = True
+            except Exception as e:
+                err = _format_razorpay_error(e)
+                logger.exception(
+                    "cancel_subscription razorpay_failed user_id=%s razorpay_subscription_id=%s error=%s",
+                    current_user.id,
+                    subscription.razorpay_subscription_id,
+                    err,
+                )
+                if settings.app_env == "production":
+                    raise HTTPException(
+                        status_code=502,
+                        detail=(
+                            "Failed to cancel with Razorpay: "
+                            f"{err}. subscription_id={subscription.razorpay_subscription_id}"
+                        ),
+                    )
+                local_warning = err
 
     subscription.cancel_at_period_end = True
     db.commit()
+    logger.info(
+        "cancel_subscription scheduled user_id=%s subscription_id=%s cancel_at_period_end=%s current_period_end=%s",
+        current_user.id,
+        subscription.id,
+        subscription.cancel_at_period_end,
+        subscription.current_period_end,
+    )
+
+    msg = "Subscription will be cancelled at the end of the current billing period."
+    if subscription.razorpay_subscription_id and not subscription.razorpay_subscription_id.startswith("sub_mock_"):
+        if cancelled_via_razorpay:
+            msg = "Cancellation confirmed with Razorpay. Subscription remains active until period end."
+        elif settings.app_env != "production":
+            msg = (
+                "Cancellation scheduled locally (dev mode). Configure Razorpay keys to sync cancellation upstream."
+            )
+            if local_warning:
+                msg += f" Razorpay warning: {local_warning}"
 
     return CancelSubscriptionResponse(
-        message="Subscription will be cancelled at the end of the current billing period.",
+        message=msg,
         cancel_at_period_end=True,
         current_period_end=subscription.current_period_end,
     )
@@ -314,6 +402,7 @@ async def razorpay_webhook(
     Status is NEVER set manually -- only updated via this webhook.
     """
     payload_body = await request.body()
+    logger.info("razorpay_webhook received content_length=%s", len(payload_body))
 
     # Verify webhook signature
     if x_razorpay_signature:
@@ -326,6 +415,7 @@ async def razorpay_webhook(
         raise HTTPException(status_code=400, detail="Invalid JSON payload.")
 
     event_type = event.get("event")
+    logger.info("razorpay_webhook event=%s", event_type)
     if event_type not in razorpay_service.HANDLED_EVENTS:
         return WebhookResponse(received=True)
 
@@ -364,6 +454,11 @@ async def razorpay_webhook(
             subscription.cancel_at_period_end = False
 
         db.commit()
+        logger.info(
+            "razorpay_webhook subscription_updated razorpay_subscription_id=%s status=%s",
+            rz_sub_id,
+            subscription.status,
+        )
 
     # Handle payment.captured -- record payment
     elif event_type == "payment.captured":
@@ -405,5 +500,11 @@ async def razorpay_webhook(
         )
         db.add(payment)
         db.commit()
+        logger.info(
+            "razorpay_webhook payment_recorded razorpay_payment_id=%s subscription_id=%s amount_paise=%s",
+            payment.razorpay_payment_id,
+            payment.subscription_id,
+            payment.amount_paise,
+        )
 
     return WebhookResponse(received=True)

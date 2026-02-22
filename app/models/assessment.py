@@ -95,6 +95,9 @@ class StudentAssessment(Base):
     time_limit_seconds = Column(Integer, nullable=False, default=300)  # 5 min default
     started_at = Column(DateTime(timezone=True), nullable=True)
     submitted_at = Column(DateTime(timezone=True), nullable=True)
+    teacher_feedback_text = Column(Text, nullable=True)
+    teacher_feedback_score = Column(Integer, nullable=True)
+    teacher_feedback_given_at = Column(DateTime(timezone=True), nullable=True)
 
     # ── Level Used for Generation ─────────────────────────────────────────────
     # Level at the time of generation (for historical analysis)

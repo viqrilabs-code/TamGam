@@ -61,3 +61,17 @@ class NoteEditRequest(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str
+
+
+class StudentNotesGenerateResponse(BaseModel):
+    request_id: UUID
+    subject: str
+    standard: int
+    chapter: str
+    understanding_level: int
+    weak_sections: List[str] = []
+    notes_markdown: str
+    used_uploaded_chapter: bool
+    used_uploaded_exam_questions: bool
+    created_at: datetime
+    next_allowed_at: datetime

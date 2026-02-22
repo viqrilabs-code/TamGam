@@ -61,8 +61,12 @@ class Settings(BaseSettings):
     gcs_private_bucket: str = "tamgam-docs-private"
 
     # Cloud Tasks
+    cloud_tasks_enabled: bool = False
     cloud_tasks_queue: str = "tamgam-jobs"
     cloud_tasks_location: str = "asia-south1"
+    cloud_tasks_project_id: str = ""
+    cloud_tasks_target_url: str = ""
+    cloud_tasks_auth_secret: str = ""
 
     # Google Drive
     google_drive_folder_id: str = ""

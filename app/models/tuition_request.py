@@ -54,6 +54,12 @@ class TuitionRequest(Base):
         nullable=False,
         index=True,
     )
+    batch_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("batches.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     # ── Request Details ───────────────────────────────────────────────────────
     subject = Column(String(100), nullable=False)          # Subject requested
@@ -104,6 +110,7 @@ class TuitionRequest(Base):
     student  = relationship("StudentProfile",  back_populates="tuition_requests")
     teacher  = relationship("TeacherProfile",  back_populates="tuition_requests")
     enrollment = relationship("Enrollment")
+    batch = relationship("Batch")
 
     def __repr__(self) -> str:
         return (

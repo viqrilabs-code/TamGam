@@ -18,6 +18,7 @@ from app.models.subscription import Plan, Subscription, Payment        # noqa: F
 from app.models.teacher import (                                        # noqa: F401, E402
     TeacherProfile,
     TeacherVerification,
+    TeacherStudentVerificationRequest,
     VerificationDocument,
     TopPerformer,
 )
@@ -37,3 +38,5 @@ from app.models.community import (                                     # noqa: F
 )
 from app.models.notification import Notification                       # noqa: F401, E402
 from app.models.ai import ContentEmbedding, TutorSession               # noqa: F401, E402
+from app.models.homework import Homework                               # noqa: F401, E402
+from app.models.student_note_request import StudentNoteRequest         # noqa: F401, E402

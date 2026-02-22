@@ -122,6 +122,7 @@ class EnrollmentResponse(BaseModel):
     subject: str
     is_active: bool
     enrolled_at: datetime
+    pending_unenroll_at: Optional[datetime] = None
 
 
 # ── Batches ───────────────────────────────────────────────────────────────────

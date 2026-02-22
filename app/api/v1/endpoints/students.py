@@ -1,7 +1,7 @@
 # app/api/v1/endpoints/students.py
 # Student profile, enrollment, and batch endpoints
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import List
 from uuid import UUID
 
@@ -10,11 +10,15 @@ from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 import app.db.base  # noqa: F401
-from app.core.dependencies import require_login, require_subscription, resolve_user_marks
+from app.core.dependencies import (
+    get_effective_active_subscription,
+    require_login,
+)
 from app.db.session import get_db
 from app.models.student import BatchMember, Enrollment, StudentProfile, Batch
 from app.models.teacher import TeacherProfile
-from app.models.subscription import Subscription
+from app.models.notification import Notification
+from app.models.subscription import Plan
 from app.models.user import User
 from app.schemas.student import (
     BatchResponse,
@@ -39,9 +43,73 @@ def _get_student_profile_or_404(user_id, db: Session) -> StudentProfile:
 
 
 def _is_subscribed(user_id, db: Session) -> bool:
-    return db.query(Subscription).filter(
-        and_(Subscription.user_id == user_id, Subscription.status == "active")
-    ).first() is not None
+    return get_effective_active_subscription(user_id, db) is not None
+
+
+def _get_active_subscription_with_plan(user_id, db: Session):
+    active_sub = get_effective_active_subscription(user_id, db)
+    if not active_sub:
+        return None
+    plan = db.query(Plan).filter(Plan.id == active_sub.plan_id).first()
+    if not plan:
+        return None
+    return active_sub, plan
+
+
+def _sync_due_unenrollments(
+    db: Session,
+    *,
+    student_profile_id: UUID | None = None,
+    teacher_id: UUID | None = None,
+) -> None:
+    now = datetime.now(timezone.utc)
+    query = db.query(Enrollment).filter(
+        and_(
+            Enrollment.is_active == True,
+            Enrollment.pending_unenroll_at.isnot(None),
+            Enrollment.pending_unenroll_at <= now,
+        )
+    )
+    if student_profile_id:
+        query = query.filter(Enrollment.student_id == student_profile_id)
+    if teacher_id:
+        query = query.filter(Enrollment.teacher_id == teacher_id)
+
+    due = query.all()
+    if not due:
+        return
+    for enrollment in due:
+        enrollment.is_active = False
+        enrollment.unenrolled_at = enrollment.pending_unenroll_at or now
+        enrollment.pending_unenroll_at = None
+    db.flush()
+
+
+def _plan_enrollment_limit(plan_slug: str) -> int:
+    limits = {
+        "basic": 1,
+        "standard": 2,
+        "pro": 3,
+    }
+    return limits.get((plan_slug or "").lower(), 1)
+
+
+def _enforce_plan_enrollment_cap(student_profile_id: UUID, plan_slug: str, db: Session):
+    limit = _plan_enrollment_limit(plan_slug)
+    active_enrollments = db.query(Enrollment).filter(
+        and_(
+            Enrollment.student_id == student_profile_id,
+            Enrollment.is_active == True,
+        )
+    ).count()
+    if active_enrollments >= limit:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Your {(plan_slug or 'current').title()} plan allows up to {limit} "
+                f"active tuition enrollment(s) at a time."
+            ),
+        )
 
 
 def _build_private_profile(profile: StudentProfile, user: User, db: Session) -> StudentProfilePrivate:
@@ -171,6 +239,7 @@ def list_my_enrollments(
     if current_user.role != "student":
         raise HTTPException(status_code=403, detail="Student access only.")
     profile = _get_student_profile_or_404(current_user.id, db)
+    _sync_due_unenrollments(db, student_profile_id=profile.id)
 
     enrollments = db.query(Enrollment, TeacherProfile, User).join(
         TeacherProfile, TeacherProfile.id == Enrollment.teacher_id
@@ -193,6 +262,7 @@ def list_my_enrollments(
             subject=enrollment.subject,
             is_active=enrollment.is_active,
             enrolled_at=enrollment.enrolled_at,
+            pending_unenroll_at=enrollment.pending_unenroll_at,
         )
         for enrollment, teacher_profile, teacher_user in enrollments
     ]
@@ -218,7 +288,8 @@ def enroll_with_teacher(
         raise HTTPException(status_code=403, detail="Student access only.")
 
     # Check subscription
-    if not _is_subscribed(current_user.id, db):
+    active_sub = _get_active_subscription_with_plan(current_user.id, db)
+    if not active_sub:
         raise HTTPException(
             status_code=403,
             detail={
@@ -227,8 +298,11 @@ def enroll_with_teacher(
                 "redirect": "/pricing",
             },
         )
+    _, plan = active_sub
 
     profile = _get_student_profile_or_404(current_user.id, db)
+    _sync_due_unenrollments(db, student_profile_id=profile.id)
+    _enforce_plan_enrollment_cap(profile.id, plan.slug, db)
 
     # Check teacher exists
     teacher_profile = db.query(TeacherProfile).filter(
@@ -286,6 +360,7 @@ def enroll_with_teacher(
         subject=enrollment.subject,
         is_active=enrollment.is_active,
         enrolled_at=enrollment.enrolled_at,
+        pending_unenroll_at=enrollment.pending_unenroll_at,
     )
 
 
@@ -299,7 +374,7 @@ def unenroll(
     current_user: User = Depends(require_login),
     db: Session = Depends(get_db),
 ):
-    """Deactivate an enrollment. Does not delete the record."""
+    """Schedule unenrollment at billing period end. Does not delete the record."""
     if current_user.role != "student":
         raise HTTPException(status_code=403, detail="Student access only.")
 
@@ -314,23 +389,74 @@ def unenroll(
     if not enrollment:
         raise HTTPException(status_code=404, detail="Enrollment not found.")
 
-    enrollment.is_active = False
+    min_unenroll_at = enrollment.enrolled_at + timedelta(days=30)
+    if datetime.now(timezone.utc) < min_unenroll_at:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Minimum enrollment duration is 1 month. "
+                f"You can unenroll after {min_unenroll_at.date().isoformat()}."
+            ),
+        )
 
-    # Update teacher student count
+    if enrollment.pending_unenroll_at:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Unenrollment already scheduled for {enrollment.pending_unenroll_at.date().isoformat()}.",
+        )
+
+    active_sub = get_effective_active_subscription(current_user.id, db)
+    effective_at = datetime.now(timezone.utc)
+    if active_sub and active_sub.current_period_end and active_sub.current_period_end > effective_at:
+        effective_at = active_sub.current_period_end
+    enrollment.pending_unenroll_at = effective_at
+
+    # Update teacher student count if unenrollment is immediate.
     teacher_profile = db.query(TeacherProfile).filter(
         TeacherProfile.id == enrollment.teacher_id
     ).first()
+    teacher_user = None
     if teacher_profile:
-        active_count = db.query(Enrollment).filter(
-            and_(
-                Enrollment.teacher_id == enrollment.teacher_id,
-                Enrollment.is_active == True,
+        teacher_user = db.query(User).filter(User.id == teacher_profile.user_id).first()
+        if effective_at <= datetime.now(timezone.utc):
+            active_count = db.query(Enrollment).filter(
+                and_(
+                    Enrollment.teacher_id == enrollment.teacher_id,
+                    Enrollment.is_active == True,
+                )
+            ).count()
+            teacher_profile.total_students = max(0, active_count - 1)
+
+    # Notify teacher that unenrollment is scheduled at cycle end.
+    if teacher_user:
+        db.add(
+            Notification(
+                user_id=teacher_user.id,
+                notification_type="announcement",
+                title="Student unenrollment scheduled",
+                body=(
+                    f"{current_user.full_name} will be unenrolled from "
+                    f"{enrollment.subject or 'your classes'} on {effective_at.date().isoformat()}."
+                ),
+                action_url="/teacher-dashboard.html",
+                extra_data={
+                    "kind": "unenrollment",
+                    "student_user_id": str(current_user.id),
+                    "teacher_id": str(enrollment.teacher_id),
+                    "subject": enrollment.subject,
+                    "enrollment_id": str(enrollment.id),
+                    "effective_at": effective_at.isoformat(),
+                },
             )
-        ).count()
-        teacher_profile.total_students = max(0, active_count - 1)
+        )
 
     db.commit()
-    return MessageResponse(message="Unenrolled successfully.")
+    return MessageResponse(
+        message=(
+            "Unenrollment scheduled. Access to this teacher remains until "
+            f"{effective_at.date().isoformat()}."
+        )
+    )
 
 
 # ── Batch Endpoints ───────────────────────────────────────────────────────────

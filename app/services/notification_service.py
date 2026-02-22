@@ -6,6 +6,7 @@
 #   notify(db, user_id=student_id, type="class_reminder",
 #          title="Class starting soon", body="Your Maths class starts in 15 minutes")
 
+import logging
 from typing import Any, Dict, Optional
 from uuid import UUID
 
@@ -13,6 +14,8 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.notification import Notification
+
+logger = logging.getLogger("tamgam.notifications")
 
 
 # ── Notification Types ────────────────────────────────────────────────────────
@@ -87,7 +90,7 @@ def notify(
             _send_email_notification(user_id, title, body, db)
         except Exception as e:
             # Email failure should never block the main flow
-            print(f"Email notification failed for user {user_id}: {e}")
+            logger.exception("Email notification failed for user %s: %s", user_id, e)
 
     return notification
 
@@ -103,7 +106,7 @@ def _send_email_notification(
     No-op in dev mode if SENDGRID_API_KEY is not configured.
     """
     if not settings.sendgrid_api_key:
-        print(f"[DEV] Email skipped (no SendGrid key): {subject}")
+        logger.info("[DEV] Email skipped (no SendGrid key): %s", subject)
         return
 
     from app.models.user import User
@@ -117,14 +120,14 @@ def _send_email_notification(
 
         sg = sendgrid.SendGridAPIClient(api_key=settings.sendgrid_api_key)
         message = Mail(
-            from_email=settings.sendgrid_from_email or "noreply@tamgam.in",
+            from_email=settings.email_from or "noreply@tamgam.in",
             to_emails=user.email,
             subject=f"TamGam: {subject}",
             plain_text_content=body,
             html_content=_build_email_html(user.full_name, subject, body),
         )
         sg.send(message)
-        print(f"Email sent to {user.email}: {subject}")
+        logger.info("Email sent to %s: %s", user.email, subject)
     except Exception as e:
         raise RuntimeError(f"SendGrid error: {e}")
 

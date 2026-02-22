@@ -6,10 +6,13 @@
 # In production: key stored in GCP Secret Manager, mounted at runtime
 
 import io
+import logging
 import os
 from typing import Optional
 
 from app.core.config import settings
+
+logger = logging.getLogger("tamgam.google_drive")
 
 
 def _get_drive_service():
@@ -91,7 +94,7 @@ def download_docx_as_text(file_id: str) -> Optional[str]:
         return _extract_text_from_docx(file_bytes)
 
     except Exception as e:
-        print(f"Google Drive download failed for {file_id}: {e}")
+        logger.exception("Google Drive download failed for %s: %s", file_id, e)
         return None
 
 
@@ -103,7 +106,7 @@ def _extract_text_from_docx(file_bytes: bytes) -> str:
         paragraphs = [para.text for para in doc.paragraphs if para.text.strip()]
         return "\n\n".join(paragraphs)
     except Exception as e:
-        print(f"docx text extraction failed: {e}")
+        logger.exception("docx text extraction failed: %s", e)
         return ""
 
 

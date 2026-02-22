@@ -13,6 +13,7 @@ from pydantic import BaseModel, field_validator
 class TuitionRequestCreate(BaseModel):
     """Student sends this to request tuition from a teacher."""
     teacher_id: UUID
+    batch_id: Optional[UUID] = None
     subject: str
     message: Optional[str] = None    # Optional intro from student
 
@@ -47,6 +48,8 @@ class TuitionRequestResponse(BaseModel):
     teacher_name: str
     teacher_avatar_url: Optional[str] = None
     teacher_is_verified: bool
+    batch_id: Optional[UUID] = None
+    batch_name: Optional[str] = None
 
     # Request details
     subject: str
@@ -64,6 +67,8 @@ class TuitionRequestListItem(BaseModel):
     id: UUID
     status: str
     subject: str
+    batch_id: Optional[UUID] = None
+    batch_name: Optional[str] = None
     message: Optional[str] = None
     decline_reason: Optional[str] = None
     enrollment_id: Optional[UUID] = None
@@ -76,6 +81,9 @@ class TuitionRequestListItem(BaseModel):
     counterparty_avatar_url: Optional[str] = None
     counterparty_is_verified: Optional[bool] = None   # only for teachers
     counterparty_grade: Optional[int] = None          # only for students
+    counterparty_city: Optional[str] = None
+    counterparty_state: Optional[str] = None
+    counterparty_learning_goals: Optional[str] = None
 
 
 # ── Student Search (for teachers) ────────────────────────────────────────────
@@ -94,6 +102,20 @@ class StudentSearchItem(BaseModel):
     streak_days: int
     is_subscribed: bool                   # Only subscribed students can be enrolled
     already_enrolled: bool                # Already enrolled with this teacher
+
+
+class TeacherStudentItem(BaseModel):
+    """Student list item shown to teachers for active enrollments."""
+    student_id: UUID
+    user_id: UUID
+    full_name: str
+    avatar_url: Optional[str] = None
+    grade: Optional[int] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    is_subscribed: bool
+    enrolled_subjects: List[str]
+    latest_enrolled_at: Optional[datetime] = None
 
 
 class MessageResponse(BaseModel):

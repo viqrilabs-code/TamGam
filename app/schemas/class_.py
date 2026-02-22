@@ -5,11 +5,10 @@ from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
-# ── Class ─────────────────────────────────────────────────────────────────────
-
+# Class
 class ClassCreate(BaseModel):
     title: str
     subject: str
@@ -56,10 +55,8 @@ class ClassResponse(BaseModel):
     scheduled_at: datetime
     duration_minutes: int
     status: str
-    # Meet link -- only included if student has active subscription
-    # None for unsubscribed students, actual link for subscribed
     meet_link: Optional[str] = None
-    meet_link_gated: bool   # True means link exists but was hidden due to no subscription
+    meet_link_gated: bool
     transcript_status: Optional[str] = None
     notes_status: Optional[str] = None
     created_at: datetime
@@ -70,11 +67,120 @@ class ClassListResponse(BaseModel):
     total: int
 
 
-# ── Attendance ────────────────────────────────────────────────────────────────
+# Batch management
+class BatchStudentResponse(BaseModel):
+    student_id: UUID
+    user_id: UUID
+    full_name: str
+    avatar_url: Optional[str] = None
+    grade: Optional[int] = None
+    enrolled_subjects: List[str] = Field(default_factory=list)
 
+
+class BatchSummaryResponse(BaseModel):
+    id: UUID
+    name: str
+    subject: Optional[str] = None
+    class_timing: Optional[str] = None
+    description: Optional[str] = None
+    grade_level: Optional[int] = None
+    student_selection_enabled: bool = True
+    max_students: Optional[int] = None
+    class_days: List[str] = Field(default_factory=list)
+    cancelled_days: List[str] = Field(default_factory=list)
+    is_active: bool
+    member_count: int
+    created_at: datetime
+    members: List[BatchStudentResponse]
+
+
+class BatchListResponse(BaseModel):
+    batches: List[BatchSummaryResponse]
+    total: int
+
+
+class BatchCreateRequest(BaseModel):
+    name: str
+    subject: Optional[str] = None
+    class_timing: Optional[str] = None
+    description: Optional[str] = None
+    grade_level: Optional[int] = None
+    max_students: Optional[int] = None
+    class_days: List[str] = Field(default_factory=list)
+
+    @field_validator("name")
+    @classmethod
+    def batch_name_not_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Batch name cannot be empty")
+        return v
+
+    @field_validator("grade_level")
+    @classmethod
+    def valid_grade_level(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v not in (8, 9, 10):
+            raise ValueError("Grade level must be one of: 8, 9, 10")
+        return v
+
+    @field_validator("max_students")
+    @classmethod
+    def create_max_students_positive(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v < 1:
+            raise ValueError("max_students must be at least 1")
+        return v
+
+
+class BatchAddStudentsRequest(BaseModel):
+    student_ids: List[UUID]
+
+    @field_validator("student_ids")
+    @classmethod
+    def student_ids_required(cls, v: List[UUID]) -> List[UUID]:
+        if not v:
+            raise ValueError("At least one student_id is required")
+        return v
+
+
+class BatchUpdateRequest(BaseModel):
+    subject: Optional[str] = None
+    class_timing: Optional[str] = None
+    description: Optional[str] = None
+    student_selection_enabled: Optional[bool] = None
+    max_students: Optional[int] = None
+    class_days: Optional[List[str]] = None
+
+    @field_validator("max_students")
+    @classmethod
+    def max_students_positive(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v < 1:
+            raise ValueError("max_students must be at least 1")
+        return v
+
+
+class BatchCancelDayRequest(BaseModel):
+    day: str
+    note: Optional[str] = None
+
+    @field_validator("day")
+    @classmethod
+    def valid_day(cls, v: str) -> str:
+        day = v.strip().lower()
+        valid = {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"}
+        if day not in valid:
+            raise ValueError("day must be a valid weekday name")
+        return day
+
+
+class BatchEnrolledStudentListResponse(BaseModel):
+    students: List[BatchStudentResponse]
+    total: int
+
+
+# Attendance
 class AttendanceMarkRequest(BaseModel):
     """Student marks their own attendance for a class."""
-    pass   # No body needed -- just hitting the endpoint is enough
+    pass
 
 
 class AttendanceResponse(BaseModel):
@@ -94,8 +200,6 @@ class AttendanceListResponse(BaseModel):
     total_present: int
     attendance: List[AttendanceResponse]
 
-
-# ── Generic ───────────────────────────────────────────────────────────────────
 
 class MessageResponse(BaseModel):
     message: str

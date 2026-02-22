@@ -1,0 +1,27 @@
+# Dockerfile.worker
+# Cloud Run Jobs worker image for TamGam background tasks
+
+FROM python:3.13-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y \
+    libpq-dev \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt ./
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+RUN useradd --create-home --shell /bin/bash tamgam
+USER tamgam
+
+# Set JOB_MODULE to a valid module path at execution time, for example:
+# app.jobs.process_transcript
+CMD ["sh", "-c", "python -c \"import os, runpy; runpy.run_module(os.environ.get('JOB_MODULE', 'app.jobs.process_transcript'), run_name='__main__')\""]

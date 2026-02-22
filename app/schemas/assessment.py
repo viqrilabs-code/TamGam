@@ -104,9 +104,86 @@ class AssessmentHistoryItem(BaseModel):
     total_questions: int
     understanding_level: str
     submitted_at: datetime
+    teacher_feedback_text: Optional[str] = None
+    teacher_feedback_score: Optional[int] = None
+    teacher_feedback_given_at: Optional[datetime] = None
+    feedback_provider_name: Optional[str] = None
+
+
+class AssessmentFeedbackRequest(BaseModel):
+    feedback_text: Optional[str] = None
+    feedback_score: Optional[int] = None
+
+    @field_validator("feedback_score")
+    @classmethod
+    def validate_feedback_score(cls, v):
+        if v is not None and (v < 0 or v > 100):
+            raise ValueError("Feedback score must be between 0 and 100")
+        return v
 
 
 # ── Generic ───────────────────────────────────────────────────────────────────
 
 class MessageResponse(BaseModel):
     message: str
+
+
+# Profile assessment (student)
+class ProfileAssessmentQuestion(BaseModel):
+    id: int
+    type: str
+    difficulty_band: str  # below | same | above
+    topic: str
+    question: str
+    options: List[MCQOption]
+
+
+class ProfileAssessmentGenerateResponse(BaseModel):
+    attempt_token: str
+    total_questions: int
+    questions: List[ProfileAssessmentQuestion]
+
+
+class ProfileAssessmentAnswer(BaseModel):
+    question_id: int
+    answer_key: str
+
+
+class ProfileAssessmentSubmitRequest(BaseModel):
+    attempt_token: str
+    answers: List[ProfileAssessmentAnswer]
+
+    @field_validator("answers")
+    @classmethod
+    def profile_answers_not_empty(cls, v):
+        if not v:
+            raise ValueError("Must submit at least one answer")
+        return v
+
+
+class ProfileAssessmentSubmitResponse(BaseModel):
+    score: float
+    correct_count: int
+    total_questions: int
+    grade_standard: int
+    strengths: List[str]
+    improvement_areas: List[str]
+    understanding_level: int
+
+
+# Teacher upload-based assessment generation
+class TeacherAssessmentQuestion(BaseModel):
+    id: int
+    type: str  # mcq | subjective
+    question: str
+    options: Optional[List[MCQOption]] = None
+    answer: Optional[str] = None
+    explanation: Optional[str] = None
+
+
+class TeacherGeneratedAssessmentResponse(BaseModel):
+    class_id: UUID
+    total_questions: int
+    mcq_count: int
+    subjective_count: int
+    questions: List[TeacherAssessmentQuestion]

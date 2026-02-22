@@ -82,6 +82,7 @@ class Subscription(Base):
         Enum(
             "pending",    # Created, payment not yet completed
             "active",     # Paid and active (⭐ mark shown)
+            "past_due",   # Payment retry / failed states
             "paused",     # Razorpay halted (payment failed, retrying)
             "cancelled",  # Student cancelled
             "expired",    # End of subscription period
@@ -105,6 +106,7 @@ class Subscription(Base):
     # ── Dates ─────────────────────────────────────────────────────────────────
     current_period_start = Column(DateTime(timezone=True), nullable=True)
     current_period_end = Column(DateTime(timezone=True), nullable=True)
+    cancel_at_period_end = Column(Boolean, nullable=False, default=False)
     trial_end = Column(DateTime(timezone=True), nullable=True)
     cancelled_at = Column(DateTime(timezone=True), nullable=True)
 

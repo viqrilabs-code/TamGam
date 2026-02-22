@@ -7,6 +7,7 @@
 #   3. 401 responses for community actions include CTA redirect
 #   4. Meet links gated -- require_subscription() used in class endpoints
 
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -17,8 +18,8 @@ from sqlalchemy.orm import Session
 
 from app.core.security import decode_token
 from app.db.session import get_db
-from app.models.user import User
 from app.models.subscription import Subscription
+from app.models.user import User
 
 # Bearer token extractor -- auto_error=False so we can handle 401 ourselves
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -78,12 +79,7 @@ def resolve_user_marks(user: User, db: Session) -> dict:
     is_verified_teacher = False
 
     if user.role == "student":
-        active_sub = db.query(Subscription).filter(
-            and_(
-                Subscription.user_id == user.id,
-                Subscription.status == "active",
-            )
-        ).first()
+        active_sub = get_effective_active_subscription(user.id, db)
         is_subscribed = active_sub is not None
 
     elif user.role == "teacher":
@@ -102,6 +98,26 @@ def resolve_user_marks(user: User, db: Session) -> dict:
         "is_subscribed": is_subscribed,
         "is_verified_teacher": is_verified_teacher,
     }
+
+
+def get_effective_active_subscription(user_id: UUID, db: Session) -> Optional[Subscription]:
+    """
+    Return an active subscription only if it is still effective right now.
+    This ensures benefits stop immediately after period end even if webhook lag exists.
+    """
+    sub = db.query(Subscription).filter(
+        and_(
+            Subscription.user_id == user_id,
+            Subscription.status == "active",
+        )
+    ).order_by(Subscription.created_at.desc()).first()
+    if not sub:
+        return None
+
+    now = datetime.now(timezone.utc)
+    if sub.cancel_at_period_end and sub.current_period_end and now >= sub.current_period_end:
+        return None
+    return sub
 
 
 # ── Auth Dependencies ─────────────────────────────────────────────────────────
@@ -187,12 +203,7 @@ def require_subscription(
         return user
 
     # Students need an active subscription
-    active_sub = db.query(Subscription).filter(
-        and_(
-            Subscription.user_id == user.id,
-            Subscription.status == "active",
-        )
-    ).first()
+    active_sub = get_effective_active_subscription(user.id, db)
 
     if not active_sub:
         raise HTTPException(

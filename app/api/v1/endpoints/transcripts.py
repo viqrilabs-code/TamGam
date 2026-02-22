@@ -9,15 +9,17 @@
 #   5. AI Notes generation triggered after transcript is ready (Component 11)
 
 from datetime import datetime, timezone
+import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Header, HTTPException
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 import app.db.base  # noqa: F401
+from app.core.config import settings
 from app.core.dependencies import require_login, require_teacher
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 from app.models.class_ import Class
 from app.models.subscription import Subscription
 from app.models.teacher import TeacherProfile
@@ -29,9 +31,10 @@ from app.schemas.transcript import (
     TranscriptResponse,
     TranscriptUpdateRequest,
 )
-from app.services import google_drive
+from app.services import cloud_tasks, google_drive
 
 router = APIRouter()
+logger = logging.getLogger("tamgam.transcripts")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -68,39 +71,43 @@ def _build_response(transcript: Transcript, viewer: User, db) -> TranscriptRespo
     )
 
 
-def _process_transcript(transcript_id: UUID, db: Session):
+def _process_transcript(transcript_id: UUID):
     """
     Background task: download Drive file and extract text.
     Updates transcript status to completed or failed.
     """
-    transcript = db.query(Transcript).filter(Transcript.id == transcript_id).first()
-    if not transcript:
-        return
-
-    transcript.status = "processing"
-    db.commit()
-
+    db = SessionLocal()
     try:
-        raw_text = google_drive.download_docx_as_text(transcript.drive_file_id)
-        if raw_text:
-            transcript.raw_text = raw_text
-            transcript.word_count = len(raw_text.split())
-            transcript.status = "completed"
-            # Flag the class transcript as completed
-            cls = db.query(Class).filter(Class.id == transcript.class_id).first()
-            if cls:
-                cls.transcript_status = "completed"
-        else:
-            transcript.status = "failed"
-            cls = db.query(Class).filter(Class.id == transcript.class_id).first()
-            if cls:
-                cls.transcript_status = "failed"
-    except Exception as e:
-        transcript.status = "failed"
-        print(f"Transcript processing failed: {e}")
+        transcript = db.query(Transcript).filter(Transcript.id == transcript_id).first()
+        if not transcript:
+            return
 
-    transcript.updated_at = datetime.now(timezone.utc)
-    db.commit()
+        transcript.status = "processing"
+        db.commit()
+
+        try:
+            raw_text = google_drive.download_docx_as_text(transcript.drive_file_id)
+            if raw_text:
+                transcript.raw_text = raw_text
+                transcript.word_count = len(raw_text.split())
+                transcript.status = "completed"
+                # Flag the class transcript as completed
+                cls = db.query(Class).filter(Class.id == transcript.class_id).first()
+                if cls:
+                    cls.transcript_status = "completed"
+            else:
+                transcript.status = "failed"
+                cls = db.query(Class).filter(Class.id == transcript.class_id).first()
+                if cls:
+                    cls.transcript_status = "failed"
+        except Exception as e:
+            transcript.status = "failed"
+            logger.exception("Transcript processing failed for transcript_id=%s: %s", transcript_id, e)
+
+        transcript.updated_at = datetime.now(timezone.utc)
+        db.commit()
+    finally:
+        db.close()
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -156,8 +163,10 @@ def link_transcript(
     db.commit()
     db.refresh(transcript)
 
-    # Process in background
-    background_tasks.add_task(_process_transcript, transcript.id, db)
+    # Process via Cloud Tasks in production, fallback to FastAPI background task.
+    enqueued = cloud_tasks.enqueue_transcript_processing(str(transcript.id))
+    if not enqueued:
+        background_tasks.add_task(_process_transcript, transcript.id)
 
     return _build_response(transcript, current_user, db)
 
@@ -181,6 +190,77 @@ def get_transcript(
     if not transcript:
         raise HTTPException(status_code=404, detail="No transcript found for this class.")
     return _build_response(transcript, current_user, db)
+
+
+@router.get(
+    "/class/{class_id}",
+    response_model=TranscriptResponse,
+    summary="Get transcript for a class (legacy path)",
+    include_in_schema=False,
+)
+def get_transcript_legacy(
+    class_id: UUID,
+    current_user: User = Depends(require_login),
+    db: Session = Depends(get_db),
+):
+    transcript = db.query(Transcript).filter(Transcript.class_id == class_id).first()
+    if not transcript:
+        raise HTTPException(status_code=404, detail="No transcript found for this class.")
+    return _build_response(transcript, current_user, db)
+
+
+@router.post(
+    "/class/{class_id}/process",
+    response_model=MessageResponse,
+    summary="Reprocess transcript for a class (legacy path)",
+    include_in_schema=False,
+)
+def reprocess_transcript(
+    class_id: UUID,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(require_teacher),
+    db: Session = Depends(get_db),
+):
+    tp = db.query(TeacherProfile).filter(TeacherProfile.user_id == current_user.id).first()
+    if not tp:
+        raise HTTPException(status_code=404, detail="Teacher profile not found.")
+    cls = db.query(Class).filter(and_(Class.id == class_id, Class.teacher_id == tp.id)).first()
+    if not cls:
+        raise HTTPException(status_code=404, detail="Class not found.")
+
+    transcript = db.query(Transcript).filter(Transcript.class_id == class_id).first()
+    if not transcript:
+        raise HTTPException(status_code=404, detail="No transcript found for this class.")
+
+    enqueued = cloud_tasks.enqueue_transcript_processing(str(transcript.id))
+    if not enqueued:
+        background_tasks.add_task(_process_transcript, transcript.id)
+
+    return MessageResponse(message="Transcript processing started.")
+
+
+@router.post(
+    "/internal/process",
+    response_model=MessageResponse,
+    include_in_schema=False,
+)
+def process_transcript_internal(
+    payload: dict = Body(...),
+    x_task_secret: str | None = Header(default=None),
+):
+    expected = settings.cloud_tasks_auth_secret
+    if expected and x_task_secret != expected:
+        raise HTTPException(status_code=403, detail="Invalid task secret.")
+
+    transcript_id = payload.get("transcript_id")
+    if not transcript_id:
+        raise HTTPException(status_code=400, detail="transcript_id is required.")
+
+    try:
+        _process_transcript(UUID(str(transcript_id)))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid transcript_id.")
+    return MessageResponse(message="Transcript processed.")
 
 
 @router.patch(

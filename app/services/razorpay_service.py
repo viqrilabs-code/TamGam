@@ -11,15 +11,18 @@
 import hashlib
 import hmac
 import json
+import logging
 from typing import Optional
 
 import razorpay
 
 from app.core.config import settings
+logger = logging.getLogger("tamgam.razorpay")
 
 
 def get_razorpay_client() -> razorpay.Client:
     """Return authenticated Razorpay client."""
+    logger.debug("Initializing Razorpay client configured=%s", bool(settings.razorpay_key_id and settings.razorpay_key_secret))
     return razorpay.Client(
         auth=(settings.razorpay_key_id, settings.razorpay_key_secret)
     )
@@ -42,6 +45,7 @@ def create_subscription(
         Razorpay subscription object with 'id', 'status', 'short_url' etc.
     """
     client = get_razorpay_client()
+    logger.info("Razorpay create_subscription plan_id=%s total_count=%s", razorpay_plan_id, total_count)
     subscription = client.subscription.create({
         "plan_id": razorpay_plan_id,
         "total_count": total_count,
@@ -57,6 +61,7 @@ def create_subscription(
 def fetch_subscription(razorpay_subscription_id: str) -> dict:
     """Fetch current subscription state from Razorpay."""
     client = get_razorpay_client()
+    logger.info("Razorpay fetch_subscription id=%s", razorpay_subscription_id)
     return client.subscription.fetch(razorpay_subscription_id)
 
 
@@ -69,6 +74,11 @@ def cancel_subscription(
     cancel_at_cycle_end=True means it stays active until period end.
     """
     client = get_razorpay_client()
+    logger.info(
+        "Razorpay cancel_subscription id=%s cancel_at_cycle_end=%s",
+        razorpay_subscription_id,
+        cancel_at_cycle_end,
+    )
     return client.subscription.cancel(
         razorpay_subscription_id,
         {"cancel_at_cycle_end": 1 if cancel_at_cycle_end else 0},

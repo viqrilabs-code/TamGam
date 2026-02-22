@@ -21,6 +21,7 @@ from app.api.v1.endpoints import (
     channels,
     notifications,
     admin,
+    homework,
 )
 from app.api.v1.endpoints import tuition_requests
 from app.api.v1.endpoints.admin_books import router as books_router
@@ -57,6 +58,9 @@ api_router.include_router(community.router, prefix="/posts", tags=["Community - 
 
 # Notifications
 api_router.include_router(notifications.router, prefix="/notifications", tags=["Notifications"])
+
+# Homework
+api_router.include_router(homework.router, prefix="/homework", tags=["Homework"])
 
 # Admin
 api_router.include_router(admin.router, prefix="/admin", tags=["Admin"])

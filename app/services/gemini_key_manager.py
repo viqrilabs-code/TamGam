@@ -10,6 +10,7 @@
 
 import time
 import threading
+import logging
 from typing import Optional
 
 from google import genai
@@ -17,6 +18,7 @@ from google import genai
 from app.core.config import settings
 
 RECOVERY_SECONDS = 60
+logger = logging.getLogger("tamgam.gemini_keys")
 
 
 class GeminiQuotaExhausted(Exception):
@@ -40,7 +42,7 @@ class _KeyState:
 
     def mark_exhausted(self):
         self.exhausted_at = time.monotonic()
-        print(f"[GeminiKeyManager] Key #{self.index} quota exhausted — will retry after {RECOVERY_SECONDS}s")
+        logger.warning("Gemini key #%s quota exhausted; retrying after %ss", self.index, RECOVERY_SECONDS)
 
     def remaining_recovery(self) -> float:
         if self.exhausted_at is None:
@@ -76,7 +78,7 @@ class GeminiKeyManager:
             raise RuntimeError(
                 "No Gemini API keys configured. Set GEMINI_API_KEY_1 (through _5) in your .env"
             )
-        print(f"[GeminiKeyManager] Loaded {len(self._keys)} Gemini API key(s)")
+        logger.info("Loaded %s Gemini API key(s)", len(self._keys))
         self._initialized = True
 
     def get_available_key(self) -> _KeyState:
@@ -178,5 +180,5 @@ def generate_embedding_with_fallback(
             if "429" in err_str or "quota" in err_str or "resource exhausted" in err_str:
                 manager.mark_key_exhausted(key_state)
                 continue
-            print(f"[GeminiKeyManager] Embedding error: {e}")
+            logger.exception("Embedding error: %s", e)
             return None

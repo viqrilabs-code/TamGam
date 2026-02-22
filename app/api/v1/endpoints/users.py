@@ -53,11 +53,11 @@ def _get_teacher_info(db: Session, user_id: uuid.UUID) -> Optional[TeacherPublic
         return None
 
     # Count distinct students enrolled in this teacher's batches
-    from app.models.class_ import Batch, BatchMember
+    from app.models.student import Batch, BatchMember
     total_students: int = db.execute(
         select(func.count(func.distinct(BatchMember.student_id)))
         .join(Batch, Batch.id == BatchMember.batch_id)
-        .where(Batch.teacher_id == user_id)
+        .where(Batch.teacher_id == profile.id)
     ).scalar_one()
 
     subjects: list[str] = profile.subjects or []
@@ -77,7 +77,7 @@ def _get_student_info(db: Session, user_id: uuid.UUID) -> Optional[StudentPublic
     if profile is None:
         return None
     return StudentPublicInfo(
-        grade=profile.current_grade,
+        grade=profile.grade,
         performance_score=float(profile.performance_score or 0.0),
         badges=profile.badges or [],
     )
@@ -124,7 +124,7 @@ def get_own_profile(
     Includes phone, subscription status, and role-specific nested info.
     resolve_user_marks() is called to get live subscription / verification flags.
     """
-    marks = resolve_user_marks(current_user.id, db)
+    marks = resolve_user_marks(current_user, db)
 
     teacher_info = None
     student_info = None
@@ -177,7 +177,7 @@ def update_own_profile(
     db.commit()
     db.refresh(current_user)
 
-    marks = resolve_user_marks(current_user.id, db)
+    marks = resolve_user_marks(current_user, db)
 
     teacher_info = None
     student_info = None
@@ -228,7 +228,7 @@ def get_public_profile(
             detail="User not found",
         )
 
-    marks = resolve_user_marks(user.id, db)
+    marks = resolve_user_marks(user, db)
 
     teacher_info = None
     student_info = None

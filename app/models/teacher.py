@@ -99,6 +99,11 @@ class TeacherProfile(Base):
     verifications = relationship(
         "TeacherVerification", back_populates="teacher", cascade="all, delete-orphan"
     )
+    student_verification_requests = relationship(
+        "TeacherStudentVerificationRequest",
+        back_populates="teacher",
+        cascade="all, delete-orphan",
+    )
     classes = relationship("Class", back_populates="teacher")
     top_performers = relationship(
         "TopPerformer", back_populates="teacher", cascade="all, delete-orphan"
@@ -241,3 +246,44 @@ class TopPerformer(Base):
 
     def __repr__(self) -> str:
         return f"<TopPerformer teacher={self.teacher_id} student={self.student_id} rank={self.rank}>"
+
+
+class TeacherStudentVerificationRequest(Base):
+    """
+    Teacher requests a student to verify trustworthiness for T badge eligibility.
+    A teacher becomes verified after 3 student "verified" responses.
+    """
+
+    __tablename__ = "teacher_student_verification_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    teacher_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("teacher_profiles.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    student_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("student_profiles.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    status = Column(String(20), nullable=False, default="pending", index=True)
+    # Allowed statuses: pending | verified | dont_know | cancelled
+
+    requested_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    responded_at = Column(DateTime(timezone=True), nullable=True)
+
+    teacher = relationship("TeacherProfile", back_populates="student_verification_requests")
+    student = relationship("StudentProfile")
+
+    def __repr__(self) -> str:
+        return (
+            f"<TeacherStudentVerificationRequest teacher={self.teacher_id} "
+            f"student={self.student_id} status={self.status}>"
+        )

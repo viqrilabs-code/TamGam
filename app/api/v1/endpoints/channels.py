@@ -6,6 +6,7 @@
 # Also exposes GET /channels/embed/{class_id} to check embedding status.
 
 from uuid import UUID
+import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import and_
@@ -22,6 +23,7 @@ from app.models.user import User
 from app.schemas.embedding import EmbedRequest, EmbedStatusResponse, MessageResponse
 
 router = APIRouter()
+logger = logging.getLogger("tamgam.channels")
 
 
 def _run_embed(class_id: UUID, db: Session):
@@ -29,7 +31,7 @@ def _run_embed(class_id: UUID, db: Session):
     try:
         embed_class_content(class_id, db)
     except Exception as e:
-        print(f"Background embedding failed for class {class_id}: {e}")
+        logger.exception("Background embedding failed for class %s: %s", class_id, e)
 
 
 @router.post(

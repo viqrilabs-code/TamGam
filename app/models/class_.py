@@ -108,6 +108,7 @@ class Class(Base):
         "Note", back_populates="class_", uselist=False, cascade="all, delete-orphan"
     )
     assessments = relationship("StudentAssessment", back_populates="class_")
+    homeworks = relationship("Homework", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<Class title={self.title!r} subject={self.subject} status={self.status}>"

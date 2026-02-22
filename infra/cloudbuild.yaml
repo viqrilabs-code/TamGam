@@ -1,0 +1,83 @@
+steps:
+  - id: "Build API image"
+    name: "gcr.io/cloud-builders/docker"
+    args:
+      - "build"
+      - "-t"
+      - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$SHORT_SHA"
+      - "."
+
+  - id: "Push API image"
+    name: "gcr.io/cloud-builders/docker"
+    args:
+      - "push"
+      - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$SHORT_SHA"
+
+  - id: "Deploy API to Cloud Run"
+    name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
+    entrypoint: "bash"
+    args:
+      - "-ceu"
+      - |
+        IMAGE="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$SHORT_SHA"
+        ARGS=(
+          run deploy "${_SERVICE}"
+          --image "${IMAGE}"
+          --platform managed
+          --region "${_REGION}"
+          --port "8000"
+          --cpu "${_CPU}"
+          --memory "${_MEMORY}"
+          --min-instances "${_MIN_INSTANCES}"
+          --max-instances "${_MAX_INSTANCES}"
+          --concurrency "${_CONCURRENCY}"
+          --timeout "${_TIMEOUT_SECONDS}"
+          --cpu-throttling
+          --set-env-vars "APP_ENV=production,AUTO_MIGRATE_ON_STARTUP=false"
+        )
+
+        if [[ -n "${_CLOUDSQL_CONNECTION}" ]]; then
+          ARGS+=(--add-cloudsql-instances "${_CLOUDSQL_CONNECTION}")
+        fi
+
+        if [[ -n "${_VPC_CONNECTOR}" ]]; then
+          ARGS+=(--vpc-connector "${_VPC_CONNECTOR}" --vpc-egress "private-ranges-only")
+        fi
+
+        if [[ -n "${_SET_ENV_VARS}" ]]; then
+          ARGS+=(--set-env-vars "${_SET_ENV_VARS}")
+        fi
+
+        if [[ -n "${_SET_SECRETS}" ]]; then
+          ARGS+=(--set-secrets "${_SET_SECRETS}")
+        fi
+
+        if [[ "${_ALLOW_UNAUTHENTICATED}" == "true" ]]; then
+          ARGS+=(--allow-unauthenticated)
+        else
+          ARGS+=(--no-allow-unauthenticated)
+        fi
+
+        gcloud "${ARGS[@]}"
+
+images:
+  - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$SHORT_SHA"
+
+substitutions:
+  _REGION: "asia-south1"
+  _SERVICE: "tamgam-api"
+  _AR_REPO: "tamgam"
+  _CPU: "1"
+  _MEMORY: "512Mi"
+  _MIN_INSTANCES: "0"
+  _MAX_INSTANCES: "10"
+  _CONCURRENCY: "80"
+  _TIMEOUT_SECONDS: "300"
+  _ALLOW_UNAUTHENTICATED: "true"
+  _CLOUDSQL_CONNECTION: ""
+  _VPC_CONNECTOR: ""
+  _SET_ENV_VARS: ""
+  _SET_SECRETS: ""
+
+options:
+  logging: CLOUD_LOGGING_ONLY

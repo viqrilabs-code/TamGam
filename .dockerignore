@@ -1,0 +1,15 @@
+.git
+.gitignore
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+tests/
+tamgam-frontend/
+static/
+architecture.html
+README.md

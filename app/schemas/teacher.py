@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 # ── Public Author Mark ────────────────────────────────────────────────────────
@@ -110,17 +110,30 @@ class TeacherProfileUpdate(BaseModel):
         return v
 
 
+class TeacherBatchListItem(BaseModel):
+    id: UUID
+    name: str
+    subject: Optional[str] = None
+    grade_level: Optional[int] = None
+    class_timing: Optional[str] = None
+    class_days: List[str] = Field(default_factory=list)
+
+
 class TeacherListItem(BaseModel):
     """Compact teacher card for listing/discovery."""
     id: UUID
     user_id: UUID
     full_name: str
+    school_or_institution: Optional[str] = None
+    school_name: Optional[str] = None
     avatar_url: Optional[str] = None
     subjects: Optional[List[str]] = None
     experience_years: Optional[int] = None
     is_verified: bool
     total_students: int
     average_rating: Optional[float] = None
+    upcoming_class_times: Optional[List[datetime]] = None
+    available_batches: Optional[List[TeacherBatchListItem]] = None
 
 
 # ── Verification ──────────────────────────────────────────────────────────────
@@ -135,6 +148,16 @@ class VerificationDocumentResponse(BaseModel):
     # No gcs_path in response -- never expose raw GCS paths to client
 
 
+class StudentVerificationRequestItem(BaseModel):
+    id: UUID
+    student_id: UUID
+    student_name: str
+    student_grade: Optional[int] = None
+    status: str
+    requested_at: datetime
+    responded_at: Optional[datetime] = None
+
+
 class VerificationStatusResponse(BaseModel):
     """Current verification status for the teacher."""
     has_submitted: bool
@@ -142,7 +165,24 @@ class VerificationStatusResponse(BaseModel):
     submitted_at: Optional[datetime] = None
     reviewed_at: Optional[datetime] = None
     rejection_reason: Optional[str] = None
-    documents: List[VerificationDocumentResponse] = []
+    documents: List[VerificationDocumentResponse] = Field(default_factory=list)
+    verification_mode: str = "student"
+    required_verifications: int = 3
+    verified_count: int = 0
+    pending_count: int = 0
+    can_request_more: bool = True
+    requests: List[StudentVerificationRequestItem] = Field(default_factory=list)
+
+
+class VerificationRequestCreate(BaseModel):
+    student_ids: List[UUID] = Field(default_factory=list, min_length=1, max_length=3)
+
+
+class VerificationStudentCandidate(BaseModel):
+    student_id: UUID
+    full_name: str
+    email: str
+    grade: Optional[int] = None
 
 
 # ── Earnings ──────────────────────────────────────────────────────────────────
