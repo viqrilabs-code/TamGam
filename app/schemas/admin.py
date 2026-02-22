@@ -1,13 +1,9 @@
-# app/schemas/admin.py
-
 from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
 from pydantic import BaseModel
 
-
-# ── Stats ─────────────────────────────────────────────────────────────────────
 
 class PlatformStats(BaseModel):
     total_users: int
@@ -22,8 +18,6 @@ class PlatformStats(BaseModel):
     total_transcripts: int
     total_notes: int
 
-
-# ── Teacher Verification ──────────────────────────────────────────────────────
 
 class PendingVerificationItem(BaseModel):
     teacher_id: UUID
@@ -52,7 +46,21 @@ class VerifyTeacherResponse(BaseModel):
     message: str
 
 
-# ── User Management ───────────────────────────────────────────────────────────
+class AdminTeacherItem(BaseModel):
+    teacher_id: UUID
+    user_id: UUID
+    full_name: str
+    email: str
+    subjects: Optional[List[str]] = None
+    experience_years: Optional[int] = None
+    is_verified: bool
+    verified_at: Optional[datetime] = None
+    latest_verification_status: Optional[str] = None
+
+
+class AdminTeacherVerifiedUpdate(BaseModel):
+    is_verified: bool
+
 
 class AdminUserItem(BaseModel):
     id: UUID
@@ -71,13 +79,12 @@ class UserStatusUpdate(BaseModel):
     is_active: bool
 
 
-# ── Subscriptions ─────────────────────────────────────────────────────────────
-
 class AdminSubscriptionItem(BaseModel):
     id: UUID
     user_id: UUID
     user_email: str
     user_name: str
+    plan_id: UUID
     plan_name: str
     billing_cycle: str
     status: str
@@ -86,7 +93,34 @@ class AdminSubscriptionItem(BaseModel):
     created_at: datetime
 
 
-# ── Generic ───────────────────────────────────────────────────────────────────
+class AdminSubscriptionControlRequest(BaseModel):
+    cancel_at_period_end: bool
+
+
+class AdminSubscriptionUpdateRequest(BaseModel):
+    plan_id: Optional[UUID] = None
+    status: Optional[str] = None
+    billing_cycle: Optional[str] = None
+    cancel_at_period_end: Optional[bool] = None
+
+
+class AdminPaymentItem(BaseModel):
+    id: UUID
+    user_id: Optional[UUID] = None
+    user_email: Optional[str] = None
+    user_name: Optional[str] = None
+    subscription_id: Optional[UUID] = None
+    amount_paise: int
+    amount_rupees: float
+    gst_paise: int
+    status: str
+    razorpay_payment_id: Optional[str] = None
+    created_at: datetime
+
+
+class AdminPaymentStatusUpdateRequest(BaseModel):
+    status: str
+
 
 class MessageResponse(BaseModel):
     message: str

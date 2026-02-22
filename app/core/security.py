@@ -5,7 +5,7 @@
 import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -73,6 +73,8 @@ def create_refresh_token(user_id: UUID) -> str:
         "type": "refresh",
         "exp": expire,
         "iat": datetime.now(timezone.utc),
+        # Ensure every refresh token is unique even for rapid repeated logins.
+        "jti": str(uuid4()),
     }
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
