@@ -11,6 +11,9 @@ RUN apt-get update && apt-get install -y \
     libpq-dev \
     gcc \
     curl \
+    texlive-latex-extra \
+    texlive-xetex \
+    texlive-science \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Working directory ─────────────────────────────────────────────────────────

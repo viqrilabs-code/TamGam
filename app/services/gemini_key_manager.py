@@ -11,6 +11,8 @@
 import time
 import threading
 import logging
+import os
+import tempfile
 from typing import Optional
 
 from google import genai
@@ -182,3 +184,60 @@ def generate_embedding_with_fallback(
                 continue
             logger.exception("Embedding error: %s", e)
             return None
+
+
+def generate_with_uploaded_file_fallback(
+    *,
+    prompt: str,
+    file_bytes: bytes,
+    file_name: str,
+    model_name: str = "gemini-2.0-flash",
+) -> str:
+    """
+    Generate content using an uploaded file + prompt with automatic key rotation.
+    Returns response text. Raises GeminiQuotaExhausted if all keys fail.
+    """
+    tried = set()
+    suffix = ""
+    if "." in (file_name or ""):
+        suffix = "." + file_name.rsplit(".", 1)[1]
+
+    while True:
+        key_state = manager.get_available_key()
+        if key_state.index in tried:
+            raise GeminiQuotaExhausted("All available keys already tried.")
+        tried.add(key_state.index)
+
+        temp_path = None
+        uploaded = None
+        try:
+            client = key_state.get_client()
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                tmp.write(file_bytes)
+                temp_path = tmp.name
+
+            uploaded = client.files.upload(file=temp_path)
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[uploaded, prompt],
+            )
+            return response.text or ""
+
+        except Exception as e:
+            err_str = str(e).lower()
+            if "429" in err_str or "quota" in err_str or "resource exhausted" in err_str:
+                manager.mark_key_exhausted(key_state)
+                continue
+            raise
+        finally:
+            if uploaded is not None:
+                try:
+                    client.files.delete(name=uploaded.name)
+                except Exception:
+                    pass
+            if temp_path and os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except Exception:
+                    pass

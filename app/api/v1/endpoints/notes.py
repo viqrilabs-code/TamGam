@@ -9,7 +9,12 @@
 
 import json
 import logging
+import base64
+import os
 import re
+import shutil
+import subprocess
+import tempfile
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from typing import Optional
@@ -39,7 +44,10 @@ from app.schemas.note import (
     QAPair,
     StudentNotesGenerateResponse,
 )
-from app.services.gemini_key_manager import generate_with_fallback
+from app.services.gemini_key_manager import (
+    generate_with_fallback,
+    generate_with_uploaded_file_fallback,
+)
 from app.services import vertex_ai
 
 router = APIRouter()
@@ -47,6 +55,34 @@ logger = logging.getLogger("tamgam.notes")
 
 MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 ALLOWED_TEXT_EXTENSIONS = {".txt", ".md", ".docx", ".pdf"}
+LATEX_PROMPT = r"""
+You are given a class lecture PDF.
+
+Return ONLY a complete, compilable LaTeX document (no markdown, no backticks).
+It must compile with XeLaTeX.
+
+Formatting requirements:
+- Use \documentclass{article}
+- Use headings: \section{}, \subsection{}, \subsubsection{}
+- Bold important keywords using \textbf{}
+- ALL formulas must be proper math (not plain text):
+  - Use display math: \[ ... \] or equation environment.
+  - Use \frac{}{}, superscripts, parentheses, etc.
+  - Example formats:
+    \[
+      y\% \text{ of } 80 = \frac{y}{100}\times 80
+    \]
+    \[
+      A = p(1 + rt)
+    \]
+    \[
+      A = p(1 + r)^t
+    \]
+- Add a final \section{Quick Revision Summary} with 8–15 bullets.
+- Add a final \section{Possible Exam Questions} with 8–12 questions.
+
+Output must start with \documentclass and end with \end{document}.
+"""
 
 
 def _file_ext(name: str) -> str:
@@ -166,6 +202,116 @@ def _fallback_personalized_notes(subject: str, standard: int, chapter: str) -> s
     )
 
 
+def _extract_notes_markdown(raw_text: str) -> str:
+    """
+    Robustly extract notes markdown from model output.
+    Accepts:
+    - pure markdown
+    - strict JSON object with `notes_markdown`
+    - JSON wrapped in prose/code-fences
+    """
+    cleaned = (raw_text or "").strip()
+    if not cleaned:
+        return ""
+
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```[a-zA-Z]*\n?", "", cleaned)
+        cleaned = re.sub(r"\n?```$", "", cleaned).strip()
+
+    # 1) Direct JSON parse
+    try:
+        parsed = json.loads(cleaned)
+        if isinstance(parsed, dict):
+            note = str(parsed.get("notes_markdown") or "").strip()
+            if note:
+                return note
+    except Exception:
+        pass
+
+    # 2) Extract first JSON object from mixed text
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        maybe_json = cleaned[start : end + 1]
+        try:
+            parsed = json.loads(maybe_json)
+            if isinstance(parsed, dict):
+                note = str(parsed.get("notes_markdown") or "").strip()
+                if note:
+                    return note
+        except Exception:
+            pass
+
+    # 3) If model returned markdown directly
+    if len(cleaned) > 120:
+        return cleaned
+    return ""
+
+
+def _extract_latex_document(raw_text: str) -> str:
+    text = (raw_text or "").strip()
+    if not text:
+        return ""
+    start = text.find(r"\documentclass")
+    end = text.rfind(r"\end{document}")
+    if start == -1 or end == -1 or end <= start:
+        return ""
+    end += len(r"\end{document}")
+    return text[start:end].strip()
+
+
+def _compile_latex_with_xelatex(latex_text: str) -> Optional[bytes]:
+    if not latex_text.strip():
+        return None
+    if shutil.which("xelatex") is None:
+        logger.warning("xelatex not found; skipping LaTeX compilation check")
+        return None
+    try:
+        with tempfile.TemporaryDirectory(prefix="notes_latex_") as tmpdir:
+            tex_path = f"{tmpdir}/Lecture_Notes.tex"
+            with open(tex_path, "w", encoding="utf-8") as f:
+                f.write(latex_text)
+            subprocess.run(["xelatex", "-interaction=nonstopmode", tex_path], check=False, cwd=tmpdir)
+            subprocess.run(["xelatex", "-interaction=nonstopmode", tex_path], check=False, cwd=tmpdir)
+            pdf_path = f"{tmpdir}/Lecture_Notes.pdf"
+            if os.path.exists(pdf_path):
+                with open(pdf_path, "rb") as f:
+                    return f.read()
+            return None
+    except Exception:
+        return None
+
+
+def _latex_to_markdown(latex_text: str, subject: str, standard: int, chapter: str) -> str:
+    text = (latex_text or "").replace("\r\n", "\n")
+    if not text.strip():
+        return ""
+
+    text = re.sub(r"(?s)\\documentclass.*?\\begin\{document\}", "", text).strip()
+    text = re.sub(r"\\end\{document\}\s*$", "", text).strip()
+    text = re.sub(r"\\title\{(.+?)\}", r"# \1", text)
+    text = re.sub(r"\\section\{(.+?)\}", r"\n## \1\n", text)
+    text = re.sub(r"\\subsection\{(.+?)\}", r"\n### \1\n", text)
+    text = re.sub(r"\\subsubsection\{(.+?)\}", r"\n#### \1\n", text)
+    text = re.sub(r"\\textbf\{(.+?)\}", r"**\1**", text)
+    text = re.sub(r"\\begin\{itemize\}", "", text)
+    text = re.sub(r"\\end\{itemize\}", "", text)
+    text = re.sub(r"\\begin\{enumerate\}", "", text)
+    text = re.sub(r"\\end\{enumerate\}", "", text)
+    text = re.sub(r"(?m)^\s*\\item\s+", "- ", text)
+    text = re.sub(r"\\\[(.*?)\\\]", r"\n$$\1$$\n", text, flags=re.S)
+    text = re.sub(r"\\begin\{equation\}(.*?)\\end\{equation\}", r"\n$$\1$$\n", text, flags=re.S)
+    text = re.sub(r"\\%", "%", text)
+    text = re.sub(r"\\times", "x", text)
+    text = re.sub(r"\\text\{([^}]*)\}", r"\1", text)
+    text = re.sub(r"\\[a-zA-Z]+\*?(?:\[[^\]]*\])?(?:\{[^}]*\})?", "", text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+
+    if not text.startswith("#"):
+        text = f"# {subject} - Class {standard} - {chapter}\n\n{text}"
+    return text.strip()
+
+
 def _generate_personalized_notes(
     *,
     subject: str,
@@ -209,19 +355,7 @@ Uploaded past exam questions (optional):
 """
     try:
         raw = generate_with_fallback(prompt, model_name="gemini-2.0-flash")
-        cleaned = (raw or "").strip()
-        if cleaned.startswith("```"):
-            cleaned = re.sub(r"^```[a-zA-Z]*\n?", "", cleaned)
-            cleaned = re.sub(r"\n?```$", "", cleaned).strip()
-
-        notes = ""
-        try:
-            parsed = json.loads(cleaned)
-            notes = str(parsed.get("notes_markdown") or "").strip()
-        except Exception:
-            # If model returned markdown directly, still use it instead of generic fallback.
-            if len(cleaned) > 300:
-                notes = cleaned
+        notes = _extract_notes_markdown(raw or "")
 
         if notes and "Definition of key terms" not in notes:
             candidate = _clean_notes_markdown(notes)
@@ -250,22 +384,47 @@ Return ONLY JSON:
 }}
 """
             rewrite_raw = generate_with_fallback(rewrite_prompt, model_name="gemini-2.0-flash")
-            rewrite_clean = (rewrite_raw or "").strip()
-            if rewrite_clean.startswith("```"):
-                rewrite_clean = re.sub(r"^```[a-zA-Z]*\n?", "", rewrite_clean)
-                rewrite_clean = re.sub(r"\n?```$", "", rewrite_clean).strip()
-            rewritten = ""
-            try:
-                rewritten = str(json.loads(rewrite_clean).get("notes_markdown") or "").strip()
-            except Exception:
-                if len(rewrite_clean) > 300:
-                    rewritten = rewrite_clean
+            rewritten = _extract_notes_markdown(rewrite_raw or "")
             rewritten = _clean_notes_markdown(rewritten)
             if _notes_quality_ok(rewritten, chapter):
                 return rewritten
     except Exception:
         pass
-    return _fallback_personalized_notes(subject, standard, chapter)
+    return ""
+
+
+def _generate_personalized_notes_from_pdf(
+    *,
+    subject: str,
+    standard: int,
+    chapter: str,
+    understanding_level: int,
+    weak_sections: list[str],
+    chapter_pdf_bytes: bytes,
+    chapter_pdf_name: str,
+    exam_questions_text: Optional[str],
+) -> tuple[str, Optional[str]]:
+    _ = understanding_level, weak_sections, exam_questions_text  # Metadata retained for endpoint compatibility.
+    try:
+        raw = generate_with_uploaded_file_fallback(
+            prompt=LATEX_PROMPT,
+            file_bytes=chapter_pdf_bytes,
+            file_name=chapter_pdf_name,
+            model_name="gemini-2.0-flash",
+        )
+        latex_text = _extract_latex_document(raw or "")
+        if not latex_text:
+            return "", None
+
+        pdf_bytes = _compile_latex_with_xelatex(latex_text)
+        md = _latex_to_markdown(latex_text, subject, standard, chapter)
+        candidate = _clean_notes_markdown(md)
+        if candidate and len(candidate) >= 350:
+            pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii") if pdf_bytes else None
+            return candidate, pdf_b64
+    except Exception:
+        pass
+    return "", None
 
 
 def _clean_notes_markdown(notes: str) -> str:
@@ -475,16 +634,31 @@ async def generate_student_notes(
         raise HTTPException(status_code=422, detail="chapter_file is required.")
     exam_name, exam_mime, exam_size, exam_bytes = await _read_optional_file(exam_questions_file)
 
+    chapter_ext = _file_ext(chapter_name or "")
     chapter_text = None
     if chapter_bytes:
-        chapter_text = _extract_text(chapter_name or "", chapter_bytes)
-        if not chapter_text.strip():
-            raise HTTPException(status_code=400, detail="Could not extract text from uploaded chapter file.")
-        if not _contains_single_chapter(chapter_text):
-            raise HTTPException(
-                status_code=422,
-                detail="Uploaded chapter file appears to contain multiple chapters/lessons. Upload only one chapter.",
-            )
+        if chapter_ext != ".pdf":
+            chapter_text = _extract_text(chapter_name or "", chapter_bytes)
+            if not chapter_text.strip():
+                raise HTTPException(status_code=400, detail="Could not extract text from uploaded chapter file.")
+            if not _contains_single_chapter(chapter_text):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Uploaded chapter file appears to contain multiple chapters/lessons. Upload only one chapter.",
+                )
+        else:
+            # Prefer direct PDF-to-Gemini upload for better formatting and math fidelity.
+            try:
+                chapter_text = _extract_text(chapter_name or "", chapter_bytes)
+                if chapter_text.strip() and not _contains_single_chapter(chapter_text):
+                    raise HTTPException(
+                        status_code=422,
+                        detail="Uploaded chapter file appears to contain multiple chapters/lessons. Upload only one chapter.",
+                    )
+            except HTTPException:
+                raise
+            except Exception:
+                chapter_text = None
 
     exam_text = None
     if exam_bytes:
@@ -514,24 +688,37 @@ async def generate_student_notes(
     db.add(request_row)
     db.flush()
 
-    notes_markdown = _generate_personalized_notes(
-        subject=subject_clean,
-        standard=standard,
-        chapter=chapter_clean,
-        understanding_level=understanding_level,
-        weak_sections=weak_sections,
-        chapter_text=chapter_text,
-        exam_questions_text=exam_text,
-    )
-    notes_markdown = _clean_notes_markdown(notes_markdown)
-    if not _notes_quality_ok(notes_markdown, chapter_clean):
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "Diya could not produce quality notes for this request right now. "
-                "Please upload the chapter PDF and try again."
-            ),
+    notes_pdf_base64 = None
+    if chapter_ext == ".pdf":
+        notes_markdown, notes_pdf_base64 = _generate_personalized_notes_from_pdf(
+            subject=subject_clean,
+            standard=standard,
+            chapter=chapter_clean,
+            understanding_level=understanding_level,
+            weak_sections=weak_sections,
+            chapter_pdf_bytes=chapter_bytes,
+            chapter_pdf_name=chapter_name or "chapter.pdf",
+            exam_questions_text=exam_text,
         )
+    else:
+        notes_markdown = _generate_personalized_notes(
+            subject=subject_clean,
+            standard=standard,
+            chapter=chapter_clean,
+            understanding_level=understanding_level,
+            weak_sections=weak_sections,
+            chapter_text=chapter_text,
+            exam_questions_text=exam_text,
+        )
+    notes_markdown = _clean_notes_markdown(notes_markdown)
+    if not notes_markdown or len(notes_markdown.strip()) < 350:
+        logger.warning(
+            "Student notes fallback used: empty/short output (subject=%s, standard=%s, chapter=%s)",
+            subject_clean,
+            standard,
+            chapter_clean,
+        )
+        notes_markdown = _fallback_personalized_notes(subject_clean, standard, chapter_clean)
 
     db.commit()
     db.refresh(request_row)
@@ -544,6 +731,7 @@ async def generate_student_notes(
         understanding_level=understanding_level,
         weak_sections=weak_sections,
         notes_markdown=notes_markdown,
+        notes_pdf_base64=notes_pdf_base64,
         used_uploaded_chapter=chapter_bytes is not None,
         used_uploaded_exam_questions=exam_bytes is not None,
         created_at=request_row.created_at,

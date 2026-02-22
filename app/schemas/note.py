@@ -71,6 +71,7 @@ class StudentNotesGenerateResponse(BaseModel):
     understanding_level: int
     weak_sections: List[str] = []
     notes_markdown: str
+    notes_pdf_base64: Optional[str] = None
     used_uploaded_chapter: bool
     used_uploaded_exam_questions: bool
     created_at: datetime
