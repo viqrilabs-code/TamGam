@@ -13,6 +13,7 @@ class ClassCreate(BaseModel):
     title: str
     subject: str
     description: Optional[str] = None
+    meet_link: Optional[str] = None
     scheduled_at: datetime
     duration_minutes: int = 60
     batch_id: Optional[UUID] = None   # Optional -- can be for all enrolled students
@@ -31,6 +32,18 @@ class ClassCreate(BaseModel):
         if v < 15 or v > 480:
             raise ValueError("Duration must be between 15 and 480 minutes")
         return v
+
+    @field_validator("meet_link")
+    @classmethod
+    def normalize_meet_link(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        link = v.strip()
+        if not link:
+            return None
+        if not (link.startswith("http://") or link.startswith("https://")):
+            raise ValueError("Live class link must start with http:// or https://")
+        return link
 
 
 class ClassUpdate(BaseModel):

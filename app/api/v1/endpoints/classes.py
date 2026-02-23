@@ -13,7 +13,6 @@ from app.db.session import get_db
 from app.models.class_ import Attendance, Class
 from app.models.notification import Notification
 from app.models.student import Batch, BatchMember, Enrollment, StudentProfile
-from app.models.subscription import Subscription
 from app.models.teacher import TeacherProfile
 from app.models.user import User
 from app.schemas.class_ import (
@@ -36,13 +35,6 @@ from app.schemas.class_ import (
 
 router = APIRouter()
 
-
-def _is_subscribed(user_id, db):
-    return db.query(Subscription).filter(
-        and_(Subscription.user_id == user_id, Subscription.status == "active")
-    ).first() is not None
-
-
 def _build_class_response(cls, teacher_profile, teacher_user, viewer, db):
     show_link = False
     link_gated = False
@@ -50,10 +42,9 @@ def _build_class_response(cls, teacher_profile, teacher_user, viewer, db):
         if viewer.role in ("teacher", "admin"):
             show_link = True
         elif viewer.role == "student":
-            if _is_subscribed(viewer.id, db):
-                show_link = True
-            elif cls.meet_link:
-                link_gated = True
+            # Students receive classes only for their enrolled teachers.
+            # If a live link exists, expose it so enrolled students can join.
+            show_link = bool(cls.meet_link)
     return ClassResponse(
         id=cls.id,
         title=cls.title,
@@ -186,6 +177,7 @@ def create_class(payload: ClassCreate, current_user: User = Depends(require_teac
         title=payload.title,
         subject=payload.subject,
         description=payload.description,
+        meet_link=payload.meet_link,
         grade_level=selected_batch.grade_level if selected_batch else None,
         scheduled_at=payload.scheduled_at,
         duration_minutes=payload.duration_minutes,
@@ -582,15 +574,21 @@ def update_class(
         raise HTTPException(status_code=404, detail="Class not found.")
     previous_scheduled_at = cls.scheduled_at
     previous_batch_id = cls.batch_id
+    previous_meet_link = cls.meet_link
     updates = payload.model_dump(exclude_none=True)
     for field, value in updates.items():
         setattr(cls, field, value)
     cls.updated_at = datetime.now(timezone.utc)
 
     scheduled_changed = "scheduled_at" in updates and updates["scheduled_at"] != previous_scheduled_at
-    batch_targets = set()
+    meet_link_changed = (
+        "meet_link" in updates
+        and bool(str(updates["meet_link"]).strip() if updates["meet_link"] is not None else "")
+        and updates["meet_link"] != previous_meet_link
+    )
+    recipient_user_ids: set[UUID] = set()
     effective_batch_id = cls.batch_id or previous_batch_id
-    if scheduled_changed and effective_batch_id:
+    if effective_batch_id:
         batch_rows = db.query(User.id).join(
             StudentProfile, StudentProfile.user_id == User.id
         ).join(
@@ -598,9 +596,14 @@ def update_class(
         ).filter(
             BatchMember.batch_id == effective_batch_id
         ).all()
-        batch_targets = {row[0] for row in batch_rows}
+        recipient_user_ids = {row[0] for row in batch_rows}
+    else:
+        enrolled_rows = _get_enrolled_students_for_teacher(tp.id, db, grade_level=None)
+        recipient_user_ids = {item.user_id for item in _build_enrolled_student_items(enrolled_rows)}
+
+    if scheduled_changed:
         schedule_label = cls.scheduled_at.strftime("%d %b %Y %I:%M %p UTC")
-        for user_id in batch_targets:
+        for user_id in recipient_user_ids:
             db.add(
                 Notification(
                     user_id=user_id,
@@ -611,7 +614,24 @@ def update_class(
                     extra_data={
                         "kind": "class_rescheduled",
                         "class_id": str(cls.id),
-                        "batch_id": str(effective_batch_id),
+                        "batch_id": str(effective_batch_id) if effective_batch_id else None,
+                    },
+                )
+            )
+
+    if meet_link_changed:
+        for user_id in recipient_user_ids:
+            db.add(
+                Notification(
+                    user_id=user_id,
+                    notification_type="announcement",
+                    title=f"Live class link updated: {cls.title}",
+                    body=f"{current_user.full_name} updated the live class link. Open the class card to join.",
+                    action_url="/dashboard.html",
+                    extra_data={
+                        "kind": "class_link_updated",
+                        "class_id": str(cls.id),
+                        "batch_id": str(effective_batch_id) if effective_batch_id else None,
                     },
                 )
             )
