@@ -13,6 +13,7 @@ jobs:
       JWT_SECRET_KEY: ci-test-secret
       DATABASE_URL: postgresql+psycopg2://ci:ci@localhost:5432/ci
       REDIS_URL: ""
+      PYTHONPATH: ${{ github.workspace }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,7 +30,7 @@ jobs:
 
       - name: Run unit tests
         run: |
-          pytest -q \
+          python -m pytest -q \
             --cov=app.core.config \
             --cov=app.core.security \
             --cov=app.core.dependencies \
