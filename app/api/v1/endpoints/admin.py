@@ -10,6 +10,7 @@ import app.db.base  # noqa: F401
 from app.core.dependencies import require_admin
 from app.db.session import get_db
 from app.models.class_ import Class
+from app.models.contact_complaint import ContactComplaint
 from app.models.note import Note
 from app.models.subscription import Payment, Plan, Subscription
 from app.models.teacher import TeacherProfile, TeacherVerification, VerificationDocument
@@ -31,7 +32,9 @@ from app.schemas.admin import (
     VerifyTeacherRequest,
     VerifyTeacherResponse,
 )
+from app.schemas.contact import ComplaintAdminItem, ComplaintAdminUpdateRequest
 from app.services.notification_service import notify
+from app.services.payout_service import create_monthly_settlement_rows, trigger_pending_payouts
 
 router = APIRouter()
 
@@ -510,3 +513,94 @@ def update_payment_status(
     payment.status = payload.status
     db.commit()
     return MessageResponse(message="Payment status updated.")
+
+
+@router.post(
+    "/payouts/process",
+    response_model=MessageResponse,
+    summary="Create monthly payout settlements and trigger Razorpay payouts",
+)
+def process_teacher_payouts(
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    try:
+        created = create_monthly_settlement_rows(db)
+        db.commit()
+        processed = trigger_pending_payouts(db)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail=f"Payout processing failed: {exc}")
+    return MessageResponse(
+        message=f"Payout pipeline completed. Settlements created: {len(created)}. Payouts processed: {len(processed)}."
+    )
+
+
+@router.get(
+    "/complaints",
+    response_model=List[ComplaintAdminItem],
+    summary="List contact complaints (admin only)",
+)
+def list_complaints(
+    status: Optional[str] = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    query = db.query(ContactComplaint)
+    if status:
+        query = query.filter(ContactComplaint.status == status)
+
+    rows = query.order_by(ContactComplaint.created_at.desc()).offset(skip).limit(limit).all()
+    return [
+        ComplaintAdminItem(
+            id=row.id,
+            user_id=row.user_id,
+            full_name=row.full_name,
+            email=row.email,
+            subject=row.subject,
+            message=row.message,
+            source_page=row.source_page,
+            status=row.status,
+            admin_notes=row.admin_notes,
+            resolved_at=row.resolved_at,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+        for row in rows
+    ]
+
+
+@router.patch(
+    "/complaints/{complaint_id}",
+    response_model=MessageResponse,
+    summary="Update complaint status/notes (admin only)",
+)
+def update_complaint(
+    complaint_id: UUID,
+    payload: ComplaintAdminUpdateRequest,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    complaint = db.query(ContactComplaint).filter(ContactComplaint.id == complaint_id).first()
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Complaint not found.")
+
+    if payload.status is not None:
+        allowed = {"open", "in_progress", "resolved", "closed"}
+        if payload.status not in allowed:
+            raise HTTPException(status_code=422, detail="Invalid complaint status.")
+        complaint.status = payload.status
+        if payload.status in {"resolved", "closed"}:
+            complaint.resolved_at = datetime.now(timezone.utc)
+        else:
+            complaint.resolved_at = None
+
+    if payload.admin_notes is not None:
+        complaint.admin_notes = payload.admin_notes.strip() or None
+
+    complaint.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    return MessageResponse(message="Complaint updated.")

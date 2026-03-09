@@ -1,5 +1,5 @@
 # Dockerfile.worker
-# Cloud Run Jobs worker image for TamGam background tasks
+# Cloud Run Jobs worker image for tamgam background tasks
 
 FROM python:3.13-slim
 

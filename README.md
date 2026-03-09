@@ -1,14 +1,14 @@
-# TamGam 🎓
+# tamgam 🎓
 
 > **AI-powered live teaching platform** — Live classes on Google Meet, AI-generated notes, adaptive assessments, level-aware AI tutor, and a thriving community. Built for the Indian EdTech market.
 
 ---
 
-## What is TamGam?
+## What is tamgam?
 
-TamGam is a subscription-based EdTech platform where teachers conduct live classes on **Google Meet**, and the platform handles everything else — capturing transcripts, generating AI notes, assessing student understanding, and providing a personalised AI tutor that explains concepts at exactly the right level for each student.
+tamgam is a subscription-based EdTech platform where teachers conduct live classes on **Google Meet**, and the platform handles everything else — capturing transcripts, generating AI notes, assessing student understanding, and providing a personalised AI tutor that explains concepts at exactly the right level for each student.
 
-The platform does not build video infrastructure. Google Meet handles live classes. TamGam builds the intelligence layer on top.
+The platform does not build video infrastructure. Google Meet handles live classes. tamgam builds the intelligence layer on top.
 
 ---
 
@@ -169,6 +169,8 @@ Marks are **computed at query time** from the database — never cached. Appear 
 |---|---|
 | **Razorpay** | Student subscriptions (India-first) |
 
+Teacher payout processing is documented in `tamgam-frontend/teacher-payment-pipeline.html`.
+
 ### Third Party
 | Service | Purpose |
 |---|---|
@@ -185,6 +187,7 @@ users                          # Base user — all roles
 subscriptions                  # Student subscription + status
 plans                          # Subscription plans
 payments                       # Payment audit trail
+teacher_payouts                # Teacher payout settlements + payout status
 teacher_profiles               # Teacher public + private data
 teacher_verifications          # T mark verification workflow
 verification_documents         # Uploaded docs (GCS private)
@@ -399,6 +402,7 @@ gcloud run deploy tamgam-api \
 |---|---|---|
 | POST | `/api/v1/auth/signup` | Create account |
 | POST | `/api/v1/auth/login` | Get JWT token |
+| POST | `/api/v1/auth/firebase-phone` | Exchange Firebase phone ID token for tamgam JWTs |
 | GET | `/api/v1/auth/google` | Google OAuth |
 | GET | `/api/v1/posts/{channel_id}` | List community posts (open) |
 | POST | `/api/v1/posts/{channel_id}` | Create post (login required) |

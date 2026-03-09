@@ -51,6 +51,10 @@ class User(Base):
     is_active = Column(Boolean, nullable=False, default=True)
     is_email_verified = Column(Boolean, nullable=False, default=False)
     email_verification_token = Column(String(255), nullable=True)
+    teacher_payout_declaration_accepted = Column(Boolean, nullable=False, default=False)
+    teacher_payout_declaration_accepted_at = Column(DateTime(timezone=True), nullable=True)
+    teacher_payout_declaration_version = Column(String(64), nullable=True)
+    teacher_payout_declaration_ip = Column(String(64), nullable=True)
 
     # ── Timestamps ────────────────────────────────────────────────────────────
     created_at = Column(

@@ -1,8 +1,8 @@
-# app/api/v1/endpoints/community.py
+﻿# app/api/v1/endpoints/community.py
 # Community endpoints: channels, posts, replies, reactions
 #
 # Access rules:
-#   Read (GET): anonymous allowed — offers channel: everyone sees post list,
+#   Read (GET): anonymous allowed â€” offers channel: everyone sees post list,
 #               but full detail requires subscription
 #   Write (POST): must be logged in; offers channel = verified teachers only
 #   Identity marks resolved live on every author field
@@ -16,7 +16,12 @@ from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 import app.db.base  # noqa: F401
-from app.core.dependencies import get_optional_user, require_login, resolve_user_marks
+from app.core.dependencies import (
+    ensure_teacher_billing_active,
+    get_optional_user,
+    require_login,
+    resolve_user_marks,
+)
 from app.db.session import get_db
 from app.models.community import Channel, Post, Reaction, Reply
 from app.models.user import User
@@ -33,11 +38,12 @@ from app.schemas.community import (
     ReplyCreateRequest,
     ReplyResponse,
 )
+from app.services.plan_limits import assert_feature_available, consume_feature
 
 router = APIRouter()
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _build_author(user: User, db) -> AuthorInfo:
     marks = resolve_user_marks(user, db)
@@ -108,7 +114,7 @@ def _build_reply_response(reply: Reply, author: User, viewer_id, db) -> ReplyRes
     )
 
 
-# ── Channel Endpoints ─────────────────────────────────────────────────────────
+# â”€â”€ Channel Endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get(
     "/channels",
@@ -116,7 +122,7 @@ def _build_reply_response(reply: Reply, author: User, viewer_id, db) -> ReplyRes
     summary="List community channels (public)",
 )
 def list_channels(db: Session = Depends(get_db)):
-    """Public — list all active community channels."""
+    """Public â€” list all active community channels."""
     channels = db.query(Channel).filter(Channel.is_active == True).all()
     return [
         ChannelResponse(
@@ -131,7 +137,7 @@ def list_channels(db: Session = Depends(get_db)):
     ]
 
 
-# ── Post Endpoints ────────────────────────────────────────────────────────────
+# â”€â”€ Post Endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get(
     "/channels/{channel_id}/posts",
@@ -146,7 +152,7 @@ def list_posts(
     db: Session = Depends(get_db),
 ):
     """
-    Public — list posts in a channel, newest first.
+    Public â€” list posts in a channel, newest first.
     Offers channel: everyone sees the post list.
     Author name and full body are blurred for non-subscribed viewers.
     """
@@ -170,7 +176,7 @@ def list_posts(
 
         if is_offers and not viewer_subscribed:
             author_info = _build_author_blurred(author_user)
-            body_preview = post.body[:60] + "… 🔒 Subscribe to read full offer"
+            body_preview = post.body[:60] + "â€¦ ðŸ”’ Subscribe to read full offer"
         else:
             author_info = _build_author(author_user, db)
             body_preview = post.body[:200] + ("..." if len(post.body) > 200 else "")
@@ -215,10 +221,15 @@ def create_post(
     if getattr(channel, 'teacher_only', False):
         if current_user.role != 'teacher':
             raise HTTPException(status_code=403, detail="Only teachers can post in this channel.")
+        ensure_teacher_billing_active(current_user, db)
         from app.models.teacher import TeacherProfile
         tp = db.query(TeacherProfile).filter(TeacherProfile.user_id == current_user.id).first()
         if not tp or not tp.is_verified:
             raise HTTPException(status_code=403, detail="Only verified teachers can post offers.")
+    elif current_user.role == "student":
+        if not _is_subscribed(current_user, db):
+            raise HTTPException(status_code=403, detail={"message": "Active subscription required.", "redirect": "/plans.html"})
+        assert_feature_available(current_user.id, "community_interactions_monthly", db)
 
     post = Post(
         channel_id=channel_id,
@@ -228,6 +239,8 @@ def create_post(
         reply_count=0,
     )
     db.add(post)
+    if current_user.role == "student":
+        consume_feature(current_user.id, "community_interactions_monthly", db)
     db.commit()
     db.refresh(post)
 
@@ -317,7 +330,7 @@ def delete_post(
     return MessageResponse(message="Post deleted.")
 
 
-# ── Reply Endpoints ───────────────────────────────────────────────────────────
+# â”€â”€ Reply Endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.post(
     "/posts/{post_id}/replies",
@@ -342,6 +355,10 @@ def create_reply(
         ).first()
         if not parent:
             raise HTTPException(status_code=404, detail="Parent reply not found.")
+    if current_user.role == "student":
+        if not _is_subscribed(current_user, db):
+            raise HTTPException(status_code=403, detail={"message": "Active subscription required.", "redirect": "/plans.html"})
+        assert_feature_available(current_user.id, "community_interactions_monthly", db)
 
     reply = Reply(
         post_id=post_id,
@@ -351,13 +368,15 @@ def create_reply(
     )
     db.add(reply)
     post.reply_count = (post.reply_count or 0) + 1
+    if current_user.role == "student":
+        consume_feature(current_user.id, "community_interactions_monthly", db)
     db.commit()
     db.refresh(reply)
 
     return _build_reply_response(reply, current_user, current_user.id, db)
 
 
-# ── Reaction Endpoints ────────────────────────────────────────────────────────
+# â”€â”€ Reaction Endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.post(
     "/posts/{post_id}/reactions",
@@ -415,3 +434,4 @@ def add_reaction(
         user_id=current_user.id,
         created_at=reaction.created_at,
     )
+

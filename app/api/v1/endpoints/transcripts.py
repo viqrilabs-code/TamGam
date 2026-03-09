@@ -1,4 +1,4 @@
-# app/api/v1/endpoints/transcripts.py
+﻿# app/api/v1/endpoints/transcripts.py
 # Transcript pipeline endpoints
 #
 # Flow:
@@ -37,9 +37,12 @@ router = APIRouter()
 logger = logging.getLogger("tamgam.transcripts")
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _is_subscribed(user_id, db):
+    user = db.query(User).filter(User.id == user_id).first()
+    if user and user.role == "student":
+        return True
     return db.query(Subscription).filter(
         and_(Subscription.user_id == user_id, Subscription.status == "active")
     ).first() is not None
@@ -110,7 +113,7 @@ def _process_transcript(transcript_id: UUID):
         db.close()
 
 
-# ── Endpoints ─────────────────────────────────────────────────────────────────
+# â”€â”€ Endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.post(
     "/{class_id}",
@@ -330,3 +333,4 @@ def delete_transcript(
     cls.notes_status = None
     db.commit()
     return MessageResponse(message="Transcript deleted.")
+

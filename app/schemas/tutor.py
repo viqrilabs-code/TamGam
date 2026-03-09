@@ -21,6 +21,7 @@ class TutorAskRequest(BaseModel):
     question: str
     session_id: Optional[UUID] = None
     class_id: Optional[UUID] = None
+    gemini_api_key: Optional[str] = None
 
     @field_validator("question")
     @classmethod
@@ -31,6 +32,18 @@ class TutorAskRequest(BaseModel):
         if len(v) > 2000:
             raise ValueError("Question too long (max 2000 characters)")
         return v
+
+    @field_validator("gemini_api_key")
+    @classmethod
+    def validate_api_key(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        value = v.strip()
+        if not value:
+            return None
+        if len(value) < 20 or len(value) > 200:
+            raise ValueError("Invalid Gemini API key format")
+        return value
 
 
 class TutorAskResponse(BaseModel):

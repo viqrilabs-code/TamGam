@@ -27,6 +27,7 @@ from app.core.dependencies import require_login, require_teacher
 from app.db.session import get_db
 from app.models.assessment import StudentAssessment, StudentUnderstandingProfile
 from app.models.class_ import Class
+from app.models.homework import Homework
 from app.models.notification import Notification
 from app.models.note import Note
 from app.models.student import StudentProfile
@@ -53,6 +54,7 @@ from app.schemas.assessment import (
     TeacherGeneratedAssessmentResponse,
 )
 from app.services.gemini_key_manager import generate_with_fallback
+from app.services.plan_limits import assert_feature_available, consume_feature
 
 router = APIRouter()
 logger = logging.getLogger("tamgam.assessments")
@@ -212,7 +214,50 @@ def _extract_text_from_uploaded_file(file_name: str, file_bytes: bytes) -> str:
             return "\n".join(p.text.strip() for p in doc.paragraphs if p.text and p.text.strip())
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Could not parse DOCX file: {exc}") from exc
-    raise HTTPException(status_code=415, detail="Unsupported file type. Please upload .txt, .md, or .docx.")
+    if lower.endswith(".pdf"):
+        try:
+            from pypdf import PdfReader
+
+            reader = PdfReader(BytesIO(file_bytes))
+            pages = []
+            for page in reader.pages:
+                pages.append((page.extract_text() or "").strip())
+            return "\n".join(p for p in pages if p)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Could not parse PDF file: {exc}") from exc
+    raise HTTPException(status_code=415, detail="Unsupported file type. Please upload .txt, .md, .docx, or .pdf.")
+
+
+def _collect_pre_reading_text_for_class(class_id: UUID, teacher_id: UUID, db: Session) -> str:
+    rows = db.query(Homework).filter(
+        and_(
+            Homework.class_id == class_id,
+            Homework.teacher_id == teacher_id,
+            Homework.kind == "pre_reading",
+        )
+    ).order_by(Homework.created_at.asc()).all()
+
+    blocks: list[str] = []
+    for idx, hw in enumerate(rows, start=1):
+        parts: list[str] = []
+        if hw.description:
+            desc = str(hw.description).strip()
+            if desc:
+                parts.append(desc)
+        if hw.file_bytes and hw.file_name:
+            try:
+                extracted = _extract_text_from_uploaded_file(hw.file_name, hw.file_bytes).strip()
+                if extracted:
+                    parts.append(extracted)
+            except HTTPException:
+                # Skip non-text extractable files (for example images) and
+                # still keep title/description context if present.
+                pass
+        if not parts:
+            continue
+        title = (hw.title or f"Pre-reading #{idx}").strip()
+        blocks.append(f"{title}\n" + "\n\n".join(parts))
+    return "\n\n".join(blocks)
 
 
 def _teacher_fallback_questions() -> List[dict]:
@@ -320,9 +365,12 @@ def _latest_profile_assessment_ts(student_id: UUID, db: Session) -> Optional[dat
     return latest
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _is_subscribed(user_id, db):
+    user = db.query(User).filter(User.id == user_id).first()
+    if user and user.role == "student":
+        return True
     return db.query(Subscription).filter(
         and_(Subscription.user_id == user_id, Subscription.status == "active")
     ).first() is not None
@@ -489,7 +537,7 @@ def _run_generation(sa_id: UUID, note_content: dict, subject: str, level: int, d
     db.commit()
 
 
-# ── Endpoints ─────────────────────────────────────────────────────────────────
+# â”€â”€ Endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.post(
     "/profile/generate",
@@ -502,6 +550,9 @@ def generate_profile_assessment(
 ):
     if current_user.role != "student":
         raise HTTPException(status_code=403, detail="Student access only.")
+    if not _is_subscribed(current_user.id, db):
+        raise HTTPException(status_code=403, detail={"message": "Active subscription required.", "redirect": "/plans.html"})
+    assert_feature_available(current_user.id, "profile_assessment_attempts_monthly", db)
 
     student = db.query(StudentProfile).filter(StudentProfile.user_id == current_user.id).first()
     if not student:
@@ -539,6 +590,8 @@ def generate_profile_assessment(
         ],
     }
     attempt_token = _sign_attempt_payload(token_payload)
+    consume_feature(current_user.id, "profile_assessment_attempts_monthly", db)
+    db.commit()
 
     return ProfileAssessmentGenerateResponse(
         attempt_token=attempt_token,
@@ -662,11 +715,12 @@ def submit_profile_assessment(
 @router.post(
     "/{class_id}/generate-from-upload",
     response_model=TeacherGeneratedAssessmentResponse,
-    summary="Generate class assessment from uploaded notes/transcript (teacher only)",
+    summary="Generate class assessment from pre-reading and optional uploads (teacher only)",
 )
 async def generate_assessment_from_upload(
     class_id: UUID,
-    file: UploadFile = File(...),
+    file: Optional[UploadFile] = File(None),
+    previous_year_questions_file: Optional[UploadFile] = File(None),
     current_user: User = Depends(require_teacher),
     db: Session = Depends(get_db),
 ):
@@ -677,16 +731,83 @@ async def generate_assessment_from_upload(
     if not cls:
         raise HTTPException(status_code=404, detail="Class not found.")
 
-    file_bytes = await file.read()
-    if not file_bytes:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
-    source_text = _extract_text_from_uploaded_file(file.filename or "", file_bytes)
-    if not source_text.strip():
-        raise HTTPException(status_code=400, detail="Could not extract any text from uploaded file.")
+    source_parts: list[str] = []
+
+    pre_reading_text = _collect_pre_reading_text_for_class(cls.id, teacher.id, db).strip()
+    if pre_reading_text:
+        source_parts.append(f"Pre-reading context:\n{pre_reading_text}")
+
+    if file is not None:
+        file_bytes = await file.read()
+        if not file_bytes:
+            raise HTTPException(status_code=400, detail="Uploaded class context file is empty.")
+        uploaded_text = _extract_text_from_uploaded_file(file.filename or "", file_bytes).strip()
+        if not uploaded_text:
+            raise HTTPException(status_code=400, detail="Could not extract text from uploaded class context file.")
+        source_parts.append(f"Uploaded class context:\n{uploaded_text}")
+
+    if previous_year_questions_file is not None:
+        pyq_bytes = await previous_year_questions_file.read()
+        if not pyq_bytes:
+            raise HTTPException(status_code=400, detail="Uploaded previous year questions file is empty.")
+        pyq_text = _extract_text_from_uploaded_file(previous_year_questions_file.filename or "", pyq_bytes).strip()
+        if not pyq_text:
+            raise HTTPException(status_code=400, detail="Could not extract text from previous year questions file.")
+        source_parts.append(f"Previous year questions context:\n{pyq_text}")
+
+    if not source_parts:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "No assessment source content found. "
+                "Upload pre-reading for this class, or upload class context/previous year questions in this popup."
+            ),
+        )
+
+    source_text = "\n\n".join(source_parts)
 
     questions = _generate_teacher_questions(cls.title, cls.subject, source_text)
     mcq_count = sum(1 for q in questions if q["type"] == "mcq")
     subjective_count = sum(1 for q in questions if q["type"] == "subjective")
+
+    # Persist/update a class template so students can open and submit this assessment.
+    template_questions = []
+    for q in questions:
+        item = dict(q)
+        item["band"] = str(item.get("band") or "at_level")
+        if str(item.get("type") or "").lower() == "subjective":
+            item["type"] = "short_answer"
+        template_questions.append(item)
+
+    max_score = sum(BAND_POINTS.get(str(q.get("band") or "at_level"), 3) for q in template_questions)
+    template = db.query(StudentAssessment).filter(
+        and_(StudentAssessment.class_id == class_id, StudentAssessment.student_id == None)
+    ).first()
+    if not template:
+        template = StudentAssessment(
+            class_id=class_id,
+            student_id=None,
+            status="pending",
+            time_limit_seconds=600,
+        )
+        db.add(template)
+    template.questions = template_questions
+    template.student_answers = None
+    template.total_questions = len(template_questions)
+    template.score = None
+    template.max_score = float(max_score or max(1, len(template_questions)))
+    template.percentage = None
+    template.below_correct = 0
+    template.at_level_correct = 0
+    template.above_correct = 0
+    template.started_at = None
+    template.submitted_at = None
+    template.teacher_feedback_text = None
+    template.teacher_feedback_score = None
+    template.teacher_feedback_given_at = None
+    template.level_at_generation = 3
+    template.status = "pending"
+
     cls.assessment_generated = True
     cls.updated_at = datetime.now(timezone.utc)
     db.commit()
@@ -836,6 +957,7 @@ def submit_assessment(
         raise HTTPException(status_code=403, detail="Student access only.")
     if not _is_subscribed(current_user.id, db):
         raise HTTPException(status_code=403, detail={"message": "Active subscription required.", "redirect": "/pricing"})
+    assert_feature_available(current_user.id, "class_assessment_submissions_monthly", db)
 
     sp = db.query(StudentProfile).filter(StudentProfile.user_id == current_user.id).first()
     if not sp:
@@ -936,6 +1058,7 @@ def submit_assessment(
                     },
                 )
             )
+    consume_feature(current_user.id, "class_assessment_submissions_monthly", db)
     db.commit()
 
     return AssessmentSubmitResponse(
@@ -1054,3 +1177,4 @@ def provide_assessment_feedback(
 
     db.commit()
     return MessageResponse(message="Assessment feedback saved.")
+

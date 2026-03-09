@@ -122,7 +122,7 @@ def _send_email_notification(
         message = Mail(
             from_email=settings.email_from or "noreply@tamgam.in",
             to_emails=user.email,
-            subject=f"TamGam: {subject}",
+            subject=f"tamgam: {subject}",
             plain_text_content=body,
             html_content=_build_email_html(user.full_name, subject, body),
         )
@@ -139,7 +139,7 @@ def _build_email_html(full_name: str, subject: str, body: str) -> str:
 <html>
 <body style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px;">
     <div style="background: #f97316; padding: 20px; border-radius: 8px 8px 0 0;">
-        <h1 style="color: white; margin: 0;">TamGam</h1>
+        <h1 style="color: white; margin: 0;">tamgam</h1>
         <p style="color: #fed7aa; margin: 4px 0 0 0;">From darkness to light 🪔</p>
     </div>
     <div style="background: #fff; padding: 24px; border: 1px solid #e5e7eb; border-radius: 0 0 8px 8px;">
@@ -148,7 +148,7 @@ def _build_email_html(full_name: str, subject: str, body: str) -> str:
         <p style="color: #4b5563; line-height: 1.6;">{body}</p>
         <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;">
         <p style="color: #9ca3af; font-size: 12px;">
-            You received this email from TamGam. To manage notifications, visit your account settings.
+            You received this email from tamgam. To manage notifications, visit your account settings.
         </p>
     </div>
 </body>

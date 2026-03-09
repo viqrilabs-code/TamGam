@@ -5,17 +5,17 @@ from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
-# ── Requests (input) ──────────────────────────────────────────────────────────
-
+# Requests (input)
 class TuitionRequestCreate(BaseModel):
     """Student sends this to request tuition from a teacher."""
+
     teacher_id: UUID
     batch_id: Optional[UUID] = None
     subject: str
-    message: Optional[str] = None    # Optional intro from student
+    message: Optional[str] = None
 
     @field_validator("subject")
     @classmethod
@@ -27,23 +27,28 @@ class TuitionRequestCreate(BaseModel):
 
 class TuitionRequestDecline(BaseModel):
     """Teacher provides a reason when declining."""
+
     decline_reason: Optional[str] = None
 
 
-# ── Responses (output) ────────────────────────────────────────────────────────
+class BatchPaymentInitRequest(BaseModel):
+    subject: Optional[str] = None
+    message: Optional[str] = None
+    callback_url: Optional[str] = None
 
+
+# Responses (output)
 class TuitionRequestResponse(BaseModel):
     """Full tuition request detail."""
-    id: UUID
-    status: str                           # pending | accepted | declined | cancelled
 
-    # Student info
+    id: UUID
+    status: str
+
     student_id: UUID
     student_name: str
     student_avatar_url: Optional[str] = None
     student_grade: Optional[int] = None
 
-    # Teacher info
     teacher_id: UUID
     teacher_name: str
     teacher_avatar_url: Optional[str] = None
@@ -51,19 +56,18 @@ class TuitionRequestResponse(BaseModel):
     batch_id: Optional[UUID] = None
     batch_name: Optional[str] = None
 
-    # Request details
     subject: str
     message: Optional[str] = None
     decline_reason: Optional[str] = None
     enrollment_id: Optional[UUID] = None
 
-    # Timestamps
     created_at: datetime
     responded_at: Optional[datetime] = None
 
 
 class TuitionRequestListItem(BaseModel):
     """Compact item for list views."""
+
     id: UUID
     status: str
     subject: str
@@ -75,21 +79,48 @@ class TuitionRequestListItem(BaseModel):
     created_at: datetime
     responded_at: Optional[datetime] = None
 
-    # Counterparty (who you're seeing the request with)
     counterparty_id: UUID
     counterparty_name: str
     counterparty_avatar_url: Optional[str] = None
-    counterparty_is_verified: Optional[bool] = None   # only for teachers
-    counterparty_grade: Optional[int] = None          # only for students
+    counterparty_is_verified: Optional[bool] = None
+    counterparty_grade: Optional[int] = None
     counterparty_city: Optional[str] = None
     counterparty_state: Optional[str] = None
     counterparty_learning_goals: Optional[str] = None
 
 
-# ── Student Search (for teachers) ────────────────────────────────────────────
+class BatchCheckoutResponse(BaseModel):
+    batch_id: UUID
+    batch_name: str
+    subject: Optional[str] = None
+    description: Optional[str] = None
+    grade_level: Optional[int] = None
+    class_timing: Optional[str] = None
+    class_days: List[str] = Field(default_factory=list)
+    max_students: Optional[int] = None
+    seats_left: Optional[int] = None
+    fee_paise: int
+    fee_rupees: float
+    teacher_id: UUID
+    teacher_name: str
+    teacher_avatar_url: Optional[str] = None
+    teacher_is_verified: bool
+    teacher_profile_url: str
 
+
+class BatchPaymentInitResponse(BaseModel):
+    payment_link: str
+    amount_paise: int
+    amount_rupees: float
+    currency: str = "INR"
+    mode: str  # free | mock | razorpay
+    message: str
+
+
+# Student Search (for teachers)
 class StudentSearchItem(BaseModel):
     """Student card shown to teachers when searching for students."""
+
     student_id: UUID
     user_id: UUID
     full_name: str
@@ -100,12 +131,13 @@ class StudentSearchItem(BaseModel):
     performance_score: float
     badges: Optional[List[str]] = None
     streak_days: int
-    is_subscribed: bool                   # Only subscribed students can be enrolled
-    already_enrolled: bool                # Already enrolled with this teacher
+    is_subscribed: bool
+    already_enrolled: bool
 
 
 class TeacherStudentItem(BaseModel):
     """Student list item shown to teachers for active enrollments."""
+
     student_id: UUID
     user_id: UUID
     full_name: str

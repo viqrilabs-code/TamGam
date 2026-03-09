@@ -2,11 +2,14 @@
 # Teacher profile, verification, earnings, and top performers endpoints
 
 from datetime import datetime, timezone
-from typing import List, Optional
+import json
+import logging
+import re
+from typing import Any, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import and_, or_
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 import app.db.base  # noqa: F401
@@ -15,6 +18,7 @@ from app.db.session import get_db
 from app.models.class_ import Class
 from app.models.notification import Notification
 from app.models.student import Batch, BatchMember, StudentProfile
+from app.models.teacher_rating import TeacherRating
 from app.models.teacher import (
     TeacherProfile,
     TeacherStudentVerificationRequest,
@@ -22,7 +26,9 @@ from app.models.teacher import (
     TopPerformer,
     VerificationDocument,
 )
+from app.models.payout import TeacherPayout
 from app.models.user import User
+from app.services.gemini_key_manager import generate_with_fallback
 from app.schemas.teacher import (
     EarningsResponse,
     MessageResponse,
@@ -31,7 +37,9 @@ from app.schemas.teacher import (
     TeacherBatchListItem,
     TeacherProfilePrivate,
     TeacherProfilePublic,
+    TeacherPortfolioHighlights,
     TeacherProfileUpdate,
+    TeacherPayoutItem,
     TopPerformerItem,
     TopPerformersResponse,
     VerificationDocumentResponse,
@@ -39,11 +47,15 @@ from app.schemas.teacher import (
     VerificationStudentCandidate,
     VerificationStatusResponse,
 )
+from app.schemas.teacher_rating import TeacherRatingPublicItem, TeacherRatingSummaryResponse
 
 router = APIRouter()
+logger = logging.getLogger("tamgam.teachers")
+# X (platform fee) rounded to Rs 250 from break-even estimate at 10 teachers x 5 students each.
+TEACHER_PLATFORM_MONTHLY_FEE_PAISE = 25000
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 REQUIRED_STUDENT_VERIFICATIONS = 3
 
@@ -116,21 +128,160 @@ def _build_student_verification_items(
 
 def _commission_rate(total_revenue_paise: int) -> float:
     """
-    Commission tiers (on total lifetime revenue):
-      0 – 50,000 rupees    → 20%
-      50,001 – 2,00,000    → 15%
-      2,00,001+            → 10%
+    Commission tiers (on total tracked revenue):
+      0 â€“ 50,000 rupees    â†’ 20%
+      50,001 â€“ 2,00,000    â†’ 15%
+      2,00,001+            â†’ 10%
     """
     total_rupees = total_revenue_paise / 100
     if total_rupees <= 50000:
         return 20.0
-    elif total_rupees <= 200000:
+    if total_rupees <= 200000:
         return 15.0
     return 10.0
 
 
+def _safe_float(value: Any) -> Optional[float]:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_json_object(raw: str) -> Optional[dict]:
+    text = (raw or "").strip()
+    if not text:
+        return None
+
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+
+    match = re.search(r"\{[\s\S]*\}", text)
+    if not match:
+        return None
+    try:
+        return json.loads(match.group(0))
+    except Exception:
+        return None
+
+
+def _dedupe_keep_order(items: List[str], limit: int = 8) -> List[str]:
+    seen = set()
+    result: List[str] = []
+    for item in items:
+        value = (item or "").strip()
+        if not value:
+            continue
+        key = value.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(value)
+        if len(result) >= limit:
+            break
+    return result
+
+
+def _build_portfolio_highlights(profile: TeacherProfile, user: User) -> TeacherPortfolioHighlights:
+    education_entries = profile.education or []
+    experience_entries = profile.past_job_experiences or []
+
+    education_achievements: List[str] = []
+    best_education_score: Optional[float] = None
+    best_education_line: Optional[str] = None
+
+    for entry in education_entries:
+        if not isinstance(entry, dict):
+            continue
+        level = str(entry.get("level") or "education").strip()
+        for ach in entry.get("achievements") or []:
+            if isinstance(ach, str) and ach.strip():
+                education_achievements.append(ach.strip())
+        score_percent = _safe_float(entry.get("score_percent"))
+        marks = _safe_float(entry.get("marks_obtained"))
+        total = _safe_float(entry.get("total_marks"))
+        if score_percent is None and marks is not None and total and total > 0:
+            score_percent = (marks / total) * 100.0
+        if score_percent is not None and (best_education_score is None or score_percent > best_education_score):
+            best_education_score = score_percent
+            best_education_line = f"{level.upper()} score: {score_percent:.1f}%"
+
+    experience_achievements: List[str] = []
+    for entry in experience_entries:
+        if not isinstance(entry, dict):
+            continue
+        role = (entry.get("role_title") or "").strip()
+        org = (entry.get("organization") or "").strip()
+        if role and org:
+            experience_achievements.append(f"{role} at {org}")
+        for ach in entry.get("achievements") or []:
+            if isinstance(ach, str) and ach.strip():
+                experience_achievements.append(ach.strip())
+
+    education_achievements = _dedupe_keep_order(education_achievements, limit=10)
+    experience_achievements = _dedupe_keep_order(experience_achievements, limit=10)
+
+    candidate_marketable = _dedupe_keep_order(
+        education_achievements + experience_achievements + ([best_education_line] if best_education_line else []),
+        limit=12,
+    )
+    marketable_achievements = candidate_marketable[:5]
+
+    if marketable_achievements:
+        most_promising_aspect = marketable_achievements[0]
+    elif best_education_line:
+        most_promising_aspect = best_education_line
+    elif profile.experience_years:
+        most_promising_aspect = f"{profile.experience_years} years of teaching experience"
+    else:
+        most_promising_aspect = None
+
+    if candidate_marketable:
+        try:
+            prompt = f"""
+You are Diya helping build a teacher portfolio for parents and students.
+Select only the strongest, marketable achievements from the provided list.
+Return strict JSON with keys:
+- most_promising_aspect: string
+- marketable_achievements: string[] (max 5)
+
+Teacher: {user.full_name}
+Subjects: {", ".join(profile.subjects or []) or "Not specified"}
+Experience years: {profile.experience_years or "Not specified"}
+Candidate achievements: {json.dumps(candidate_marketable, ensure_ascii=True)}
+"""
+            raw = generate_with_fallback(prompt, model_name="gemini-2.0-flash")
+            parsed = _extract_json_object(raw)
+            if isinstance(parsed, dict):
+                ai_marketable = _dedupe_keep_order(
+                    [str(x) for x in (parsed.get("marketable_achievements") or []) if x],
+                    limit=5,
+                )
+                ai_promising = (parsed.get("most_promising_aspect") or "").strip()
+                if ai_marketable:
+                    marketable_achievements = ai_marketable
+                if ai_promising:
+                    most_promising_aspect = ai_promising
+                elif marketable_achievements:
+                    most_promising_aspect = marketable_achievements[0]
+        except Exception as exc:
+            logger.info("Diya portfolio filtering unavailable, using deterministic fallback: %s", exc)
+
+    return TeacherPortfolioHighlights(
+        most_promising_aspect=most_promising_aspect,
+        marketable_achievements=marketable_achievements,
+        education_achievements=education_achievements,
+        experience_achievements=experience_achievements,
+    )
+
+
 def _build_public_profile(profile: TeacherProfile, user: User, db: Session) -> TeacherProfilePublic:
     marks = resolve_user_marks(user, db)
+    portfolio_highlights = _build_portfolio_highlights(profile, user)
     return TeacherProfilePublic(
         id=profile.id,
         user_id=profile.user_id,
@@ -148,16 +299,21 @@ def _build_public_profile(profile: TeacherProfile, user: User, db: Session) -> T
         focus_boards=profile.focus_boards,
         class_note_tone=profile.class_note_tone,
         class_note_preferences=profile.class_note_preferences,
+        education=profile.education or [],
+        past_job_experiences=profile.past_job_experiences or [],
+        portfolio_highlights=portfolio_highlights,
         is_verified=profile.is_verified,
         total_students=profile.total_students,
         total_classes=profile.total_classes,
         average_rating=profile.average_rating,
+        rating_count=int(profile.rating_count or 0),
         is_verified_teacher=marks["is_verified_teacher"],
     )
 
 
 def _build_private_profile(profile: TeacherProfile, user: User, db: Session) -> TeacherProfilePrivate:
     marks = resolve_user_marks(user, db)
+    portfolio_highlights = _build_portfolio_highlights(profile, user)
     # Mask bank account number -- show only last 4 digits
     masked_account = None
     if profile.bank_account_number:
@@ -181,10 +337,14 @@ def _build_private_profile(profile: TeacherProfile, user: User, db: Session) -> 
         focus_boards=profile.focus_boards,
         class_note_tone=profile.class_note_tone,
         class_note_preferences=profile.class_note_preferences,
+        education=profile.education or [],
+        past_job_experiences=profile.past_job_experiences or [],
+        portfolio_highlights=portfolio_highlights,
         is_verified=profile.is_verified,
         total_students=profile.total_students,
         total_classes=profile.total_classes,
         average_rating=profile.average_rating,
+        rating_count=int(profile.rating_count or 0),
         is_verified_teacher=marks["is_verified_teacher"],
         bank_account_name=profile.bank_account_name,
         bank_account_number=masked_account,
@@ -200,7 +360,7 @@ def _build_private_profile(profile: TeacherProfile, user: User, db: Session) -> 
     )
 
 
-# ── Public Endpoints ──────────────────────────────────────────────────────────
+# â”€â”€ Public Endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def _get_upcoming_class_times(teacher_id: UUID, db: Session, limit: int = 3) -> List[datetime]:
@@ -241,17 +401,73 @@ def _get_public_batches_for_teacher(teacher_id: UUID, db: Session) -> List[Teach
         count = counts.get(b.id, 0)
         if b.max_students is not None and count >= b.max_students:
             continue
+        seats_left = None if b.max_students is None else max(0, int(b.max_students) - count)
         items.append(
             TeacherBatchListItem(
                 id=b.id,
                 name=b.name,
                 subject=b.subject,
+                description=b.description,
                 grade_level=b.grade_level,
                 class_timing=b.default_timing,
                 class_days=b.class_days or [],
+                max_students=b.max_students,
+                member_count=count,
+                seats_left=seats_left,
+                fee_paise=int(b.fee_paise or 0),
+                fee_rupees=(b.fee_paise or 0) / 100,
             )
         )
     return items
+
+
+def _build_teacher_rating_summary(
+    teacher_id: UUID,
+    db: Session,
+    *,
+    limit: int = 10,
+) -> TeacherRatingSummaryResponse:
+    profile = db.query(TeacherProfile).filter(TeacherProfile.id == teacher_id).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Teacher not found.")
+
+    avg_rating, rating_count = db.query(
+        func.avg(TeacherRating.rating),
+        func.count(TeacherRating.id),
+    ).filter(
+        TeacherRating.teacher_id == teacher_id
+    ).one()
+
+    avg_value = float(avg_rating) if avg_rating is not None else None
+    count_value = int(rating_count or 0)
+
+    rows = db.query(TeacherRating, User).join(
+        StudentProfile, StudentProfile.id == TeacherRating.student_id
+    ).join(
+        User, User.id == StudentProfile.user_id
+    ).filter(
+        TeacherRating.teacher_id == teacher_id
+    ).order_by(
+        TeacherRating.updated_at.desc()
+    ).limit(limit).all()
+
+    items = [
+        TeacherRatingPublicItem(
+            rating=rating.rating,
+            comment=(rating.comment or "").strip() or None,
+            student_name=user.full_name,
+            created_at=rating.created_at,
+            updated_at=rating.updated_at,
+        )
+        for rating, user in rows
+    ]
+
+    return TeacherRatingSummaryResponse(
+        teacher_id=teacher_id,
+        average_rating=avg_value,
+        rating_count=count_value,
+        ratings=items,
+    )
 
 
 @router.get(
@@ -324,6 +540,7 @@ def list_teachers(
             is_verified=profile.is_verified,
             total_students=profile.total_students,
             average_rating=profile.average_rating,
+            rating_count=int(profile.rating_count or 0),
             upcoming_class_times=_get_upcoming_class_times(profile.id, db),
             available_batches=_get_public_batches_for_teacher(profile.id, db),
         )
@@ -346,6 +563,19 @@ def get_teacher_public(teacher_id: UUID, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Teacher not found.")
     user = db.query(User).filter(User.id == profile.user_id).first()
     return _build_public_profile(profile, user, db)
+
+
+@router.get(
+    "/{teacher_id}/ratings",
+    response_model=TeacherRatingSummaryResponse,
+    summary="Get teacher ratings summary (public)",
+)
+def get_teacher_ratings(
+    teacher_id: UUID,
+    limit: int = Query(10, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    return _build_teacher_rating_summary(teacher_id=teacher_id, db=db, limit=limit)
 
 
 @router.get(
@@ -390,7 +620,7 @@ def get_top_performers(teacher_id: UUID, db: Session = Depends(get_db)):
     return TopPerformersResponse(teacher_id=teacher_id, performers=items, computed_at=computed_at)
 
 
-# ── Authenticated Teacher Endpoints ──────────────────────────────────────────
+# â”€â”€ Authenticated Teacher Endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get(
     "/me",
@@ -650,9 +880,9 @@ def get_my_earnings(
     """
     Teacher earnings breakdown with current commission tier.
     Commission tiers based on total lifetime revenue:
-      0 – 50K rupees    → 20%
-      50K – 2L rupees   → 15%
-      2L+ rupees        → 10%
+      0 â€“ 50K rupees    â†’ 20%
+      50K â€“ 2L rupees   â†’ 15%
+      2L+ rupees         â†’ 10%
     """
     profile = db.query(TeacherProfile).filter(
         TeacherProfile.user_id == current_user.id
@@ -670,4 +900,44 @@ def get_my_earnings(
         current_commission_rate_percent=rate,
         total_revenue_rupees=profile.total_revenue_paise / 100,
         net_earnings_rupees=net / 100,
+        this_month_paise=net,
+        last_month_paise=0,
+        total_paise=net,
+        platform_monthly_fee_paise=TEACHER_PLATFORM_MONTHLY_FEE_PAISE,
     )
+
+
+@router.get(
+    "/me/payouts",
+    response_model=List[TeacherPayoutItem],
+    summary="Get own payout history",
+)
+def get_my_payout_history(
+    current_user: User = Depends(require_teacher),
+    db: Session = Depends(get_db),
+):
+    profile = db.query(TeacherProfile).filter(TeacherProfile.user_id == current_user.id).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Teacher profile not found.")
+
+    payouts = db.query(TeacherPayout).filter(
+        TeacherPayout.teacher_id == profile.id
+    ).order_by(TeacherPayout.created_at.desc()).all()
+
+    return [
+        TeacherPayoutItem(
+            id=row.id,
+            period_start=row.period_start,
+            period_end=row.period_end,
+            net_amount_paise=row.net_amount_paise,
+            net_amount_rupees=row.net_amount_paise / 100,
+            status=row.status,
+            razorpay_payout_id=row.razorpay_payout_id,
+            razorpay_status=row.razorpay_status,
+            failure_reason=row.failure_reason,
+            created_at=row.created_at,
+            processed_at=row.processed_at,
+        )
+        for row in payouts
+    ]
+

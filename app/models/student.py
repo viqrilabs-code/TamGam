@@ -154,13 +154,14 @@ class Batch(Base):
     )
 
     name = Column(String(255), nullable=False)                # "Batch A - Maths 2025"
-    grade_level = Column(Integer, nullable=True)              # 8 | 9 | 10
+    grade_level = Column(Integer, nullable=True)              # 5 | 6 | 7 | 8 | 9 | 10
     subject = Column(String(100), nullable=True)
     default_timing = Column(String(100), nullable=True)       # e.g. "Mon/Wed/Fri 07:00 PM"
     student_selection_enabled = Column(Boolean, nullable=False, default=True)
     max_students = Column(Integer, nullable=True)             # null => no cap
     class_days = Column(ARRAY(String), nullable=True)         # ["monday", "wednesday"]
     cancelled_days = Column(ARRAY(String), nullable=True)     # subset of class_days
+    fee_paise = Column(Integer, nullable=False, default=0)    # Monthly fee set by teacher
     description = Column(Text, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
 
@@ -208,6 +209,15 @@ class BatchMember(Base):
     # ── Relationships ─────────────────────────────────────────────────────────
     batch = relationship("Batch", back_populates="members")
     student = relationship("StudentProfile", back_populates="batch_memberships")
+
+    @property
+    def joined_at(self):
+        # Backward-compatible alias used by API schemas/endpoints.
+        return self.added_at
+
+    @joined_at.setter
+    def joined_at(self, value):
+        self.added_at = value
 
     def __repr__(self) -> str:
         return f"<BatchMember batch={self.batch_id} student={self.student_id}>"

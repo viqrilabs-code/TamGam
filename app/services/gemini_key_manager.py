@@ -241,3 +241,101 @@ def generate_with_uploaded_file_fallback(
                     os.remove(temp_path)
                 except Exception:
                     pass
+
+
+def generate_with_api_key(
+    *,
+    prompt: str,
+    api_key: str,
+    model_name: str = "gemini-2.0-flash",
+) -> str:
+    """
+    Generate content using a user-provided Gemini API key.
+    Raises GeminiQuotaExhausted when the key hits quota/rate limits.
+    """
+    try:
+        client = genai.Client(api_key=(api_key or "").strip())
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+        )
+        return response.text or ""
+    except Exception as e:
+        err_str = str(e).lower()
+        if "429" in err_str or "quota" in err_str or "resource exhausted" in err_str:
+            raise GeminiQuotaExhausted("User Gemini API key quota exhausted.") from e
+        raise
+
+
+def generate_with_uploaded_file_api_key(
+    *,
+    prompt: str,
+    file_bytes: bytes,
+    file_name: str,
+    api_key: str,
+    model_name: str = "gemini-2.0-flash",
+) -> str:
+    """
+    Generate content with a user-provided Gemini API key using uploaded file context.
+    Raises GeminiQuotaExhausted when the key hits quota/rate limits.
+    """
+    suffix = ""
+    if "." in (file_name or ""):
+        suffix = "." + file_name.rsplit(".", 1)[1]
+
+    temp_path = None
+    uploaded = None
+    client = None
+    try:
+        client = genai.Client(api_key=(api_key or "").strip())
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(file_bytes)
+            temp_path = tmp.name
+
+        uploaded = client.files.upload(file=temp_path)
+        response = client.models.generate_content(
+            model=model_name,
+            contents=[uploaded, prompt],
+        )
+        return response.text or ""
+    except Exception as e:
+        err_str = str(e).lower()
+        if "429" in err_str or "quota" in err_str or "resource exhausted" in err_str:
+            raise GeminiQuotaExhausted("User Gemini API key quota exhausted.") from e
+        raise
+    finally:
+        if uploaded is not None and client is not None:
+            try:
+                client.files.delete(name=uploaded.name)
+            except Exception:
+                pass
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+
+
+def generate_embedding_with_api_key(
+    *,
+    text: str,
+    api_key: str,
+    model_name: str = "gemini-embedding-001",
+) -> Optional[list]:
+    """
+    Generate embedding using a user-provided Gemini API key.
+    Raises GeminiQuotaExhausted when the key hits quota/rate limits.
+    """
+    try:
+        client = genai.Client(api_key=(api_key or "").strip())
+        result = client.models.embed_content(
+            model=model_name,
+            contents=text,
+        )
+        return result.embeddings[0].values
+    except Exception as e:
+        err_str = str(e).lower()
+        if "429" in err_str or "quota" in err_str or "resource exhausted" in err_str:
+            raise GeminiQuotaExhausted("User Gemini API key quota exhausted.") from e
+        logger.exception("Embedding error (user key): %s", e)
+        return None

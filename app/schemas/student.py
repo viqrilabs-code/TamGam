@@ -25,6 +25,7 @@ class StudentProfilePublic(BaseModel):
     improvement_areas: Optional[List[str]] = None
     learning_goals: Optional[str] = None
     weekly_study_hours: Optional[int] = None
+    understanding_level: Optional[int] = None
     performance_score: Optional[float] = None
     badges: Optional[List[str]] = None
     streak_days: int
@@ -134,6 +135,8 @@ class BatchResponse(BaseModel):
     teacher_id: UUID
     teacher_name: str
     subject: Optional[str] = None
+    fee_paise: int
+    fee_rupees: float
     is_active: bool
     joined_at: datetime
 

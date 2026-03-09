@@ -34,6 +34,8 @@ from app.schemas.class_ import (
 )
 
 router = APIRouter()
+ALLOWED_BATCH_GRADES = (5, 6, 7, 8, 9, 10)
+ALLOWED_BATCH_GRADES_ERROR = "grade_level must be one of 5, 6, 7, 8, 9, 10"
 
 def _build_class_response(cls, teacher_profile, teacher_user, viewer, db):
     show_link = False
@@ -143,6 +145,8 @@ def _build_batch_summary(batch: Batch, teacher_id: UUID, db: Session) -> BatchSu
         name=batch.name,
         subject=batch.subject,
         class_timing=batch.default_timing,
+        fee_paise=int(batch.fee_paise or 0),
+        fee_rupees=(batch.fee_paise or 0) / 100,
         description=batch.description,
         grade_level=batch.grade_level,
         student_selection_enabled=batch.student_selection_enabled,
@@ -233,8 +237,8 @@ def list_batch_enrolled_students(
     current_user: User = Depends(require_teacher),
     db: Session = Depends(get_db),
 ):
-    if grade_level is not None and grade_level not in (8, 9, 10):
-        raise HTTPException(status_code=422, detail="grade_level must be one of 8, 9, 10")
+    if grade_level is not None and grade_level not in ALLOWED_BATCH_GRADES:
+        raise HTTPException(status_code=422, detail=ALLOWED_BATCH_GRADES_ERROR)
 
     teacher_profile = _get_teacher_profile_or_404(current_user.id, db)
     rows = _get_enrolled_students_for_teacher(teacher_profile.id, db, grade_level=grade_level)
@@ -248,8 +252,8 @@ def list_batches(
     current_user: User = Depends(require_teacher),
     db: Session = Depends(get_db),
 ):
-    if grade_level is not None and grade_level not in (8, 9, 10):
-        raise HTTPException(status_code=422, detail="grade_level must be one of 8, 9, 10")
+    if grade_level is not None and grade_level not in ALLOWED_BATCH_GRADES:
+        raise HTTPException(status_code=422, detail=ALLOWED_BATCH_GRADES_ERROR)
 
     teacher_profile = _get_teacher_profile_or_404(current_user.id, db)
     query = db.query(Batch).filter(Batch.teacher_id == teacher_profile.id)
@@ -283,6 +287,7 @@ def create_batch(
         name=payload.name.strip(),
         subject=payload.subject.strip() if payload.subject else None,
         default_timing=payload.class_timing.strip() if payload.class_timing else None,
+        fee_paise=int(payload.fee_paise or 0),
         description=payload.description.strip() if payload.description else None,
         grade_level=payload.grade_level,
         max_students=payload.max_students,
@@ -382,11 +387,14 @@ def update_batch(
     if not batch:
         raise HTTPException(status_code=404, detail="Batch not found.")
 
+    previous_timing = batch.default_timing
     data = payload.model_dump(exclude_none=True)
     if "subject" in data:
         batch.subject = data["subject"].strip() if data["subject"] else None
     if "class_timing" in data:
         batch.default_timing = data["class_timing"].strip() if data["class_timing"] else None
+    if "fee_paise" in data:
+        batch.fee_paise = int(data["fee_paise"] or 0)
     if "description" in data:
         batch.description = data["description"].strip() if data["description"] else None
     if "student_selection_enabled" in data:
@@ -403,6 +411,34 @@ def update_batch(
         batch.class_days = normalized
         existing_cancelled = set(batch.cancelled_days or [])
         batch.cancelled_days = [d for d in normalized if d in existing_cancelled]
+
+    timing_changed = "class_timing" in data and batch.default_timing != previous_timing
+    if timing_changed:
+        batch_students = db.query(User.id).join(
+            StudentProfile, StudentProfile.user_id == User.id
+        ).join(
+            BatchMember, BatchMember.student_id == StudentProfile.id
+        ).filter(
+            BatchMember.batch_id == batch.id
+        ).all()
+        for row in batch_students:
+            db.add(
+                Notification(
+                    user_id=row[0],
+                    notification_type="announcement",
+                    title=f"Batch timing updated: {batch.name}",
+                    body=(
+                        f"{current_user.full_name} updated the class timing to "
+                        f"{batch.default_timing or 'TBD'}."
+                    ),
+                    action_url="/dashboard.html",
+                    extra_data={
+                        "kind": "batch_timing_updated",
+                        "batch_id": str(batch.id),
+                        "timing": batch.default_timing,
+                    },
+                )
+            )
 
     db.commit()
     db.refresh(batch)

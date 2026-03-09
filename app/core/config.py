@@ -6,12 +6,13 @@
 from functools import lru_cache
 from typing import List
 
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """
-    Single source of truth for all TamGam configuration.
+    Single source of truth for all tamgam configuration.
     pydantic-settings automatically reads from environment variables.
     Variable names are case-insensitive.
     """
@@ -25,7 +26,7 @@ class Settings(BaseSettings):
 
     # App
     app_env: str = "development"
-    app_name: str = "TamGam"
+    app_name: str = "tamgam"
     app_version: str = "1.0.0"
     debug: bool = False
 
@@ -37,9 +38,13 @@ class Settings(BaseSettings):
     # Database
     database_url: str
     auto_migrate_on_startup: bool = True
+    db_pool_size: int = 5
+    db_max_overflow: int = 10
+    db_pool_recycle_seconds: int = 1800
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"
+    redis_required: bool = False
 
     # JWT
     jwt_secret_key: str
@@ -48,9 +53,30 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 30
 
     # Google OAuth
-    google_client_id: str = ""
-    google_client_secret: str = ""
-    google_redirect_uri: str = "http://localhost:8000/api/v1/auth/google/callback"
+    google_client_id: str = Field(
+        default="",
+        validation_alias=AliasChoices("google_client_id", "GOOGLE_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_ID"),
+    )
+    google_client_secret: str = Field(
+        default="",
+        validation_alias=AliasChoices("google_client_secret", "GOOGLE_CLIENT_SECRET", "GOOGLE_OAUTH_CLIENT_SECRET"),
+    )
+    google_redirect_uri: str = Field(
+        default="http://localhost:8000/api/v1/auth/google/callback",
+        validation_alias=AliasChoices("google_redirect_uri", "GOOGLE_REDIRECT_URI", "GOOGLE_OAUTH_REDIRECT_URI"),
+    )
+    firebase_project_id: str = Field(
+        default="",
+        validation_alias=AliasChoices("firebase_project_id", "FIREBASE_PROJECT_ID"),
+    )
+    firebase_credentials_json: str = Field(
+        default="",
+        validation_alias=AliasChoices("firebase_credentials_json", "FIREBASE_CREDENTIALS_JSON"),
+    )
+    firebase_credentials_path: str = Field(
+        default="",
+        validation_alias=AliasChoices("firebase_credentials_path", "FIREBASE_CREDENTIALS_PATH"),
+    )
 
     # GCP
     gcp_project_id: str = "tamgam-prod"
@@ -87,16 +113,37 @@ class Settings(BaseSettings):
     razorpay_key_id: str = ""
     razorpay_key_secret: str = ""
     razorpay_webhook_secret: str = ""
+    razorpayx_account_number: str = ""
 
     # SendGrid
     sendgrid_api_key: str = ""
     email_from: str = "noreply@tamgam.in"
-    email_from_name: str = "TamGam"
+    email_from_name: str = "tamgam"
+    email_smtp_host: str = ""
+    email_smtp_port: int = 587
+    email_smtp_username: str = ""
+    email_smtp_password: str = ""
+    email_smtp_use_tls: bool = True
+    email_login_code_ttl_minutes: int = 10
+    email_login_code_resend_cooldown_seconds: int = 45
+    email_login_code_max_attempts: int = 5
 
     # AI Tutor RAG
     rag_chunk_size: int = 500
     rag_chunk_overlap: int = 50
     rag_top_k: int = 5
+
+    @field_validator("debug", mode="before")
+    @classmethod
+    def parse_debug(cls, v):
+        if isinstance(v, bool):
+            return v
+        text = str(v or "").strip().lower()
+        if text in {"1", "true", "yes", "y", "on", "debug"}:
+            return True
+        if text in {"0", "false", "no", "n", "off", "release", "prod", "production", ""}:
+            return False
+        raise ValueError("DEBUG must be a boolean-like value (true/false).")
 
     @property
     def is_production(self) -> bool:

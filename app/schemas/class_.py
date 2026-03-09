@@ -95,6 +95,8 @@ class BatchSummaryResponse(BaseModel):
     name: str
     subject: Optional[str] = None
     class_timing: Optional[str] = None
+    fee_paise: int
+    fee_rupees: float
     description: Optional[str] = None
     grade_level: Optional[int] = None
     student_selection_enabled: bool = True
@@ -116,6 +118,7 @@ class BatchCreateRequest(BaseModel):
     name: str
     subject: Optional[str] = None
     class_timing: Optional[str] = None
+    fee_paise: int = Field(gt=0)
     description: Optional[str] = None
     grade_level: Optional[int] = None
     max_students: Optional[int] = None
@@ -132,8 +135,8 @@ class BatchCreateRequest(BaseModel):
     @field_validator("grade_level")
     @classmethod
     def valid_grade_level(cls, v: Optional[int]) -> Optional[int]:
-        if v is not None and v not in (8, 9, 10):
-            raise ValueError("Grade level must be one of: 8, 9, 10")
+        if v is not None and v not in (5, 6, 7, 8, 9, 10):
+            raise ValueError("Grade level must be one of: 5, 6, 7, 8, 9, 10")
         return v
 
     @field_validator("max_students")
@@ -158,6 +161,7 @@ class BatchAddStudentsRequest(BaseModel):
 class BatchUpdateRequest(BaseModel):
     subject: Optional[str] = None
     class_timing: Optional[str] = None
+    fee_paise: Optional[int] = Field(default=None, gt=0)
     description: Optional[str] = None
     student_selection_enabled: Optional[bool] = None
     max_students: Optional[int] = None

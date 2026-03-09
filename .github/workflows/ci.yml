@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      APP_ENV: development
+      JWT_SECRET_KEY: ci-test-secret
+      DATABASE_URL: postgresql+psycopg2://ci:ci@localhost:5432/ci
+      REDIS_URL: ""
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: |
+          pytest -q \
+            --cov=app.core.config \
+            --cov=app.core.security \
+            --cov=app.core.dependencies \
+            --cov=app.services.plan_limits \
+            --cov=app.services.razorpay_service \
+            --cov=app.services.gemini_key_manager \
+            --cov=app.schemas.tutor \
+            --cov-report=term-missing \
+            --cov-fail-under=70

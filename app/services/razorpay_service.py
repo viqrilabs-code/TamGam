@@ -58,6 +58,67 @@ def create_subscription(
     return subscription
 
 
+def create_plan(
+    *,
+    name: str,
+    amount_paise: int,
+    period: str,
+    interval: int = 1,
+    description: Optional[str] = None,
+) -> dict:
+    """
+    Create a Razorpay recurring plan.
+    period must be one of: daily, weekly, monthly, yearly.
+    """
+    if period not in {"daily", "weekly", "monthly", "yearly"}:
+        raise ValueError("period must be daily|weekly|monthly|yearly")
+    client = get_razorpay_client()
+    payload = {
+        "period": period,
+        "interval": interval,
+        "item": {
+            "name": name,
+            "amount": int(amount_paise),
+            "currency": "INR",
+            "description": description or name,
+        },
+    }
+    logger.info("Razorpay create_plan name=%s period=%s amount_paise=%s", name, period, amount_paise)
+    return client.plan.create(payload)
+
+
+def create_payment_link(
+    *,
+    amount_paise: int,
+    description: str,
+    customer_name: Optional[str] = None,
+    customer_email: Optional[str] = None,
+    callback_url: Optional[str] = None,
+    notes: Optional[dict] = None,
+) -> dict:
+    client = get_razorpay_client()
+    payload = {
+        "amount": int(amount_paise),
+        "currency": "INR",
+        "description": description,
+        "accept_partial": False,
+        "notify": {"sms": False, "email": bool(customer_email)},
+    }
+    if customer_name or customer_email:
+        payload["customer"] = {}
+        if customer_name:
+            payload["customer"]["name"] = customer_name
+        if customer_email:
+            payload["customer"]["email"] = customer_email
+    if callback_url:
+        payload["callback_url"] = callback_url
+        payload["callback_method"] = "get"
+    if notes:
+        payload["notes"] = {str(k): str(v) for k, v in notes.items()}
+    logger.info("Razorpay create_payment_link amount_paise=%s", amount_paise)
+    return client.payment_link.create(payload)
+
+
 def fetch_subscription(razorpay_subscription_id: str) -> dict:
     """Fetch current subscription state from Razorpay."""
     client = get_razorpay_client()
@@ -83,6 +144,90 @@ def cancel_subscription(
         razorpay_subscription_id,
         {"cancel_at_cycle_end": 1 if cancel_at_cycle_end else 0},
     )
+
+
+def create_contact(
+    *,
+    name: str,
+    email: Optional[str] = None,
+    contact: Optional[str] = None,
+    reference_id: Optional[str] = None,
+) -> dict:
+    client = get_razorpay_client()
+    payload = {"name": name, "type": "employee"}
+    if email:
+        payload["email"] = email
+    if contact:
+        payload["contact"] = contact
+    if reference_id:
+        payload["reference_id"] = reference_id
+    logger.info("Razorpay create_contact reference_id=%s", reference_id)
+    return client.contact.create(payload)
+
+
+def create_fund_account_upi(
+    *,
+    contact_id: str,
+    name: str,
+    vpa: str,
+) -> dict:
+    client = get_razorpay_client()
+    payload = {
+        "contact_id": contact_id,
+        "account_type": "vpa",
+        "vpa": {
+            "address": vpa,
+        },
+    }
+    if name:
+        payload["vpa"]["name"] = name
+    logger.info("Razorpay create_fund_account_upi contact_id=%s", contact_id)
+    return client.fund_account.create(payload)
+
+
+def create_fund_account_bank(
+    *,
+    contact_id: str,
+    name: str,
+    ifsc: str,
+    account_number: str,
+) -> dict:
+    client = get_razorpay_client()
+    payload = {
+        "contact_id": contact_id,
+        "account_type": "bank_account",
+        "bank_account": {
+            "name": name,
+            "ifsc": ifsc,
+            "account_number": account_number,
+        },
+    }
+    logger.info("Razorpay create_fund_account_bank contact_id=%s", contact_id)
+    return client.fund_account.create(payload)
+
+
+def create_payout(
+    *,
+    source_account_number: str,
+    fund_account_id: str,
+    amount_paise: int,
+    reference_id: str,
+    narration: str,
+) -> dict:
+    client = get_razorpay_client()
+    payload = {
+        "account_number": source_account_number,
+        "fund_account_id": fund_account_id,
+        "amount": int(amount_paise),
+        "currency": "INR",
+        "mode": "IMPS",
+        "purpose": "payout",
+        "queue_if_low_balance": True,
+        "reference_id": reference_id,
+        "narration": narration[:30] if narration else "tamgam payout",
+    }
+    logger.info("Razorpay create_payout reference_id=%s amount_paise=%s", reference_id, amount_paise)
+    return client.payout.create(payload)
 
 
 def verify_webhook_signature(

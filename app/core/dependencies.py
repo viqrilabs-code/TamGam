@@ -7,11 +7,10 @@
 #   3. 401 responses for community actions include CTA redirect
 #   4. Meet links gated -- require_subscription() used in class endpoints
 
-from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
@@ -20,12 +19,15 @@ from app.core.security import decode_token
 from app.db.session import get_db
 from app.models.subscription import Subscription
 from app.models.user import User
+from app.services.subscription_access import (
+    get_effective_active_subscriptions as _get_effective_active_subscriptions,
+)
 
 # Bearer token extractor -- auto_error=False so we can handle 401 ourselves
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
-# ── Token Extraction ──────────────────────────────────────────────────────────
+# â”€â”€ Token Extraction â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _extract_user_from_token(
     credentials: Optional[HTTPAuthorizationCredentials],
@@ -56,7 +58,7 @@ def _extract_user_from_token(
     return user
 
 
-# ── Identity Marks ────────────────────────────────────────────────────────────
+# â”€â”€ Identity Marks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def resolve_user_marks(user: User, db: Session) -> dict:
     """
@@ -79,8 +81,8 @@ def resolve_user_marks(user: User, db: Session) -> dict:
     is_verified_teacher = False
 
     if user.role == "student":
-        active_sub = get_effective_active_subscription(user.id, db)
-        is_subscribed = active_sub is not None
+        # Students are now free by default; subscription marks remain true for UX compatibility.
+        is_subscribed = True
 
     elif user.role == "teacher":
         # Import here to avoid circular imports
@@ -89,6 +91,7 @@ def resolve_user_marks(user: User, db: Session) -> dict:
             TeacherProfile.user_id == user.id
         ).first()
         is_verified_teacher = profile.is_verified if profile else False
+        is_subscribed = bool(_get_effective_active_subscriptions(user.id, db))
 
     return {
         "id": str(user.id),
@@ -105,22 +108,15 @@ def get_effective_active_subscription(user_id: UUID, db: Session) -> Optional[Su
     Return an active subscription only if it is still effective right now.
     This ensures benefits stop immediately after period end even if webhook lag exists.
     """
-    sub = db.query(Subscription).filter(
-        and_(
-            Subscription.user_id == user_id,
-            Subscription.status == "active",
-        )
-    ).order_by(Subscription.created_at.desc()).first()
-    if not sub:
-        return None
-
-    now = datetime.now(timezone.utc)
-    if sub.cancel_at_period_end and sub.current_period_end and now >= sub.current_period_end:
-        return None
-    return sub
+    active = _get_effective_active_subscriptions(user_id, db)
+    return active[0] if active else None
 
 
-# ── Auth Dependencies ─────────────────────────────────────────────────────────
+def get_effective_active_subscriptions(user_id: UUID, db: Session) -> list[Subscription]:
+    return _get_effective_active_subscriptions(user_id, db)
+
+
+# â”€â”€ Auth Dependencies â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def get_optional_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
@@ -183,10 +179,9 @@ def require_subscription(
     db: Session = Depends(get_db),
 ) -> User:
     """
-    Requires an active subscription.
-    Teachers always pass (they see their own content).
-    Admins always pass.
-    Students must have status='active' subscription.
+    Legacy dependency retained for backward-compatible endpoint wiring.
+    All authenticated users now pass because student access is free and
+    teacher billing is handled separately.
 
     Use for: Notes, AI Tutor, Assessments, Meet links.
     """
@@ -198,27 +193,11 @@ def require_subscription(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Teachers and admins always have access
-    if user.role in ("teacher", "admin"):
-        return user
-
-    # Students need an active subscription
-    active_sub = get_effective_active_subscription(user.id, db)
-
-    if not active_sub:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "message": "This feature requires an active subscription.",
-                "cta": "View plans",
-                "redirect": "/pricing",
-            },
-        )
-
     return user
 
 
 def require_teacher(
+    request: Request = None,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
     db: Session = Depends(get_db),
 ) -> User:
@@ -238,7 +217,33 @@ def require_teacher(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Teacher access required.",
         )
+    method = (request.method if request else "").upper()
+    if method in {"POST", "PUT", "PATCH", "DELETE"}:
+        ensure_teacher_billing_active(user, db)
     return user
+
+
+def ensure_teacher_billing_active(user: User, db: Session) -> None:
+    """
+    Enforce active teacher billing for premium actions.
+    Teachers without active billing can still browse GET endpoints/UI,
+    but cannot execute mutating premium operations.
+    """
+    if user.role != "teacher":
+        return
+
+    active = _get_effective_active_subscriptions(user.id, db)
+    if active:
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={
+            "message": "Active teacher billing plan required before using premium features.",
+            "redirect": "/plans.html?onboarding=1",
+            "cta": "Pay now",
+        },
+    )
 
 
 def require_admin(
@@ -262,3 +267,4 @@ def require_admin(
             detail="Admin access required.",
         )
     return user
+

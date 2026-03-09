@@ -435,7 +435,7 @@ def ingest_grade(
                     transcript_id=None,
                     note_id=None,
                     post_id=None,
-                    class_id=None,          # Not tied to any specific TamGam class
+                    class_id=None,          # Not tied to any specific tamgam class
                     subject=subject,
                     content_type="ncert_book",
                     chunk_text=chunk.text,

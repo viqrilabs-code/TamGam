@@ -1,4 +1,4 @@
-# app/api/v1/endpoints/notes.py
+﻿# app/api/v1/endpoints/notes.py
 # AI Notes generation and management endpoints
 #
 # Flow:
@@ -49,6 +49,7 @@ from app.services.gemini_key_manager import (
     generate_with_uploaded_file_fallback,
 )
 from app.services import vertex_ai
+from app.services.plan_limits import assert_feature_available, consume_feature
 
 router = APIRouter()
 logger = logging.getLogger("tamgam.notes")
@@ -78,8 +79,8 @@ Formatting requirements:
     \[
       A = p(1 + r)^t
     \]
-- Add a final \section{Quick Revision Summary} with 8–15 bullets.
-- Add a final \section{Possible Exam Questions} with 8–12 questions.
+- Add a final \section{Quick Revision Summary} with 8â€“15 bullets.
+- Add a final \section{Possible Exam Questions} with 8â€“12 questions.
 
 Output must start with \documentclass and end with \end{document}.
 """
@@ -437,12 +438,12 @@ def _clean_notes_markdown(notes: str) -> str:
 
     # Replace unicode symbols that often break in downstream PDF/copy flows.
     text = (
-        text.replace("θ", "theta")
-        .replace("¸", "theta")
-        .replace("×", "x")
-        .replace("−", "-")
-        .replace("–", "-")
-        .replace("—", "-")
+        text.replace("Î¸", "theta")
+        .replace("Â¸", "theta")
+        .replace("Ã—", "x")
+        .replace("âˆ’", "-")
+        .replace("â€“", "-")
+        .replace("â€”", "-")
     )
 
     # Collapse patterns like "F o r m u l a" -> "Formula"
@@ -496,9 +497,12 @@ def _notes_quality_ok(notes: str, chapter: str) -> bool:
     return True
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _is_subscribed(user_id, db):
+    user = db.query(User).filter(User.id == user_id).first()
+    if user and user.role == "student":
+        return True
     return db.query(Subscription).filter(
         and_(Subscription.user_id == user_id, Subscription.status == "active")
     ).first() is not None
@@ -578,7 +582,7 @@ def _run_generation(note_id: UUID, transcript_text: str, db: Session):
     db.commit()
 
 
-# ── Endpoints ─────────────────────────────────────────────────────────────────
+# â”€â”€ Endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.post(
     "/student/generate",
@@ -628,6 +632,8 @@ async def generate_student_notes(
                 f"Try again after {lock_row.next_allowed_at.isoformat()}."
             ),
         )
+
+    assert_feature_available(current_user.id, "student_notes_monthly", db)
 
     chapter_name, _chapter_mime, _chapter_size, chapter_bytes = await _read_optional_file(chapter_file)
     if chapter_bytes is None:
@@ -720,6 +726,7 @@ async def generate_student_notes(
         )
         notes_markdown = _fallback_personalized_notes(subject_clean, standard, chapter_clean)
 
+    consume_feature(current_user.id, "student_notes_monthly", db)
     db.commit()
     db.refresh(request_row)
 
@@ -908,3 +915,4 @@ def edit_notes(
     db.commit()
     db.refresh(note)
     return _build_response(note, current_user, db)
+

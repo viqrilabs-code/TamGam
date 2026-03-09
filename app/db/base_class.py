@@ -8,6 +8,6 @@ from sqlalchemy.orm import DeclarativeBase
 
 class Base(DeclarativeBase):
     """
-    Single declarative base for all TamGam ORM models.
+    Single declarative base for all tamgam ORM models.
     """
     pass

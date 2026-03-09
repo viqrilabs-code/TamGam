@@ -89,7 +89,7 @@ def _get_vertex_client():
 
 # ── Notes Generation ──────────────────────────────────────────────────────────
 
-NOTES_GENERATION_PROMPT = """You are an expert educational content creator for Indian school students aged 10-14.
+NOTES_GENERATION_PROMPT = """You are an expert educational content creator for Indian school students in standards 5-10.
 
 Given the following class transcript, generate comprehensive study notes in JSON format.
 
@@ -115,7 +115,7 @@ Generate a JSON object with exactly this structure:
 }}
 
 Rules:
-- summary: 2-3 sentences, simple language for 10-14 year olds
+- summary: 2-3 sentences, simple language for standards 5-10 students
 - key_points: 5-8 bullet points, most important concepts only
 - detailed_notes: Comprehensive markdown, include all examples discussed
 - qa_pairs: 3-5 Q&A pairs covering key concepts, suitable for self-testing

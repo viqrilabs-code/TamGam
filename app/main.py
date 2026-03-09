@@ -1,17 +1,19 @@
 # app/main.py
-# TamGam FastAPI application entry point
+# tamgam FastAPI application entry point
 
 import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import redis as redis_lib
 from alembic import command
 from alembic.config import Config
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.router import api_router
 from app.core.config import settings
@@ -20,6 +22,10 @@ from app.db.session import check_db_connection, engine
 
 configure_logging(debug=settings.debug)
 logger = logging.getLogger("tamgam.main")
+
+
+def _redis_check_enabled() -> bool:
+    return bool(settings.redis_url.strip())
 
 
 def run_startup_migrations() -> bool:
@@ -45,13 +51,17 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("Database connection failed -- check DATABASE_URL")
 
-    try:
-        r = redis_lib.from_url(settings.redis_url, socket_connect_timeout=2)
-        r.ping()
-        r.close()
-        logger.info("Redis connection: OK")
-    except Exception:
-        logger.warning("Redis connection failed -- check REDIS_URL")
+    if _redis_check_enabled():
+        try:
+            r = redis_lib.from_url(settings.redis_url, socket_connect_timeout=2)
+            r.ping()
+            r.close()
+            logger.info("Redis connection: OK")
+        except Exception:
+            level = logger.error if settings.redis_required else logger.warning
+            level("Redis connection failed -- check REDIS_URL")
+    else:
+        logger.info("Redis disabled (REDIS_URL not set)")
 
     yield
 
@@ -63,7 +73,7 @@ app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
     description=(
-        "TamGam by Viqri Labs -- EdTech platform for Indian children aged 10-14. "
+        "tamgam by Viqri Labs -- EdTech platform for Indian children in standards 5-10. "
         "From darkness to light."
     ),
     docs_url="/api/docs",
@@ -116,17 +126,43 @@ async def request_logging_middleware(request, call_next):
 app.include_router(api_router, prefix="/api/v1")
 
 
+@app.get("/auth/google", include_in_schema=False)
+def legacy_google_login_redirect(request: Request):
+    """
+    Backward-compatible alias for older OAuth redirect URIs.
+    """
+    qs = request.url.query
+    target = "/api/v1/auth/google"
+    if qs:
+        target = f"{target}?{qs}"
+    return RedirectResponse(url=target, status_code=307)
+
+
+@app.get("/auth/google/callback", include_in_schema=False)
+def legacy_google_callback_redirect(request: Request):
+    """
+    Backward-compatible alias for older OAuth callback URIs.
+    """
+    qs = request.url.query
+    target = "/api/v1/auth/google/callback"
+    if qs:
+        target = f"{target}?{qs}"
+    return RedirectResponse(url=target, status_code=307)
+
+
 @app.get("/health", tags=["Health"], include_in_schema=False)
 def health_check():
     db_ok = check_db_connection()
-    redis_ok = False
-    try:
-        r = redis_lib.from_url(settings.redis_url, socket_connect_timeout=1)
-        r.ping()
-        r.close()
-        redis_ok = True
-    except Exception:
-        logger.debug("Redis health check failed")
+    redis_state = "disabled"
+    if _redis_check_enabled():
+        try:
+            r = redis_lib.from_url(settings.redis_url, socket_connect_timeout=1)
+            r.ping()
+            r.close()
+            redis_state = "ok"
+        except Exception:
+            redis_state = "unavailable"
+            logger.debug("Redis health check failed")
 
     return JSONResponse(
         status_code=200,
@@ -137,7 +173,7 @@ def health_check():
             "environment": settings.app_env,
             "services": {
                 "database": "ok" if db_ok else "unavailable",
-                "redis": "ok" if redis_ok else "unavailable",
+                "redis": redis_state,
             },
         },
     )
@@ -145,10 +181,19 @@ def health_check():
 
 @app.get("/", include_in_schema=False)
 def root():
+    if _FRONTEND_DIR.exists():
+        return RedirectResponse(url="/index.html", status_code=307)
     return JSONResponse(
         content={
-            "message": "TamGam API -- From darkness to light",
+            "message": "tamgam API -- From darkness to light",
             "docs": "/api/docs",
             "health": "/health",
         }
     )
+
+
+# Local convenience: serve frontend static pages from the same host/port as API.
+# Keep this mount after explicit API/health routes so they are not shadowed.
+_FRONTEND_DIR = Path(__file__).resolve().parent.parent / "tamgam-frontend"
+if _FRONTEND_DIR.exists():
+    app.mount("/", StaticFiles(directory=str(_FRONTEND_DIR), html=True), name="frontend")

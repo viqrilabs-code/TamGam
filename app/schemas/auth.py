@@ -1,20 +1,20 @@
 # app/schemas/auth.py
-# Pydantic request/response models for authentication endpoints
+# Pydantic request/response models for authentication endpoints.
 
-import re
 from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, field_validator
 
 
-# ── Signup ────────────────────────────────────────────────────────────────────
-
 class SignupRequest(BaseModel):
     email: EmailStr
     password: str
     full_name: str
+    verification_code: str
     role: str = "student"  # student | teacher
+    teacher_declaration_accepted: bool = False
+    teacher_declaration_version: Optional[str] = None
 
     @field_validator("password")
     @classmethod
@@ -33,28 +33,111 @@ class SignupRequest(BaseModel):
     @field_validator("full_name")
     @classmethod
     def name_not_empty(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
+        value = v.strip()
+        if not value:
             raise ValueError("Full name cannot be empty")
-        return v
+        return value
 
+    @field_validator("teacher_declaration_version")
+    @classmethod
+    def declaration_version_trim(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        return v.strip() or None
 
-# ── Login ─────────────────────────────────────────────────────────────────────
+    @field_validator("verification_code")
+    @classmethod
+    def verification_code_six_digits(cls, v: str) -> str:
+        value = (v or "").strip()
+        if len(value) != 6 or not value.isdigit():
+            raise ValueError("verification_code must be a 6-digit number")
+        return value
+
 
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
 
 
-# ── Token Responses ───────────────────────────────────────────────────────────
+class EmailLoginCodeSendRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class SignupEmailCodeSendRequest(BaseModel):
+    email: EmailStr
+
+
+class ForgotPasswordCodeSendRequest(BaseModel):
+    email: EmailStr
+
+
+class EmailLoginCodeSendResponse(BaseModel):
+    message: str
+    resend_after_seconds: int
+
+
+class EmailCodeLoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+    verification_code: str
+
+    @field_validator("verification_code")
+    @classmethod
+    def verification_code_six_digits(cls, v: str) -> str:
+        value = (v or "").strip()
+        if len(value) != 6 or not value.isdigit():
+            raise ValueError("verification_code must be a 6-digit number")
+        return value
+
+
+class ForgotPasswordResetRequest(BaseModel):
+    email: EmailStr
+    verification_code: str
+    new_password: str
+
+    @field_validator("verification_code")
+    @classmethod
+    def forgot_password_code_six_digits(cls, v: str) -> str:
+        value = (v or "").strip()
+        if len(value) != 6 or not value.isdigit():
+            raise ValueError("verification_code must be a 6-digit number")
+        return value
+
+    @field_validator("new_password")
+    @classmethod
+    def forgot_password_strength(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("new_password must be at least 8 characters")
+        return v
+
+
+class FirebasePhoneLoginRequest(BaseModel):
+    id_token: str
+    full_name: Optional[str] = None
+
+    @field_validator("id_token")
+    @classmethod
+    def id_token_not_empty(cls, v: str) -> str:
+        token = v.strip()
+        if not token:
+            raise ValueError("id_token cannot be empty")
+        return token
+
+    @field_validator("full_name")
+    @classmethod
+    def trim_full_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        trimmed = v.strip()
+        return trimmed or None
+
 
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
-    expires_in: int  # seconds until access token expiry
-
-    # User info embedded so frontend doesn't need a second request
+    expires_in: int
     user_id: UUID
     role: str
     full_name: str
@@ -63,28 +146,20 @@ class TokenResponse(BaseModel):
 
 
 class AccessTokenResponse(BaseModel):
-    """Returned by /refresh -- only a new access token, not a new refresh token."""
     access_token: str
     token_type: str = "bearer"
     expires_in: int
 
 
-# ── Refresh ───────────────────────────────────────────────────────────────────
-
 class RefreshRequest(BaseModel):
     refresh_token: str
 
-
-# ── Logout ────────────────────────────────────────────────────────────────────
 
 class LogoutRequest(BaseModel):
     refresh_token: str
 
 
-# ── Google OAuth ──────────────────────────────────────────────────────────────
-
 class GoogleCallbackResponse(BaseModel):
-    """Returned after successful Google OAuth -- same shape as TokenResponse."""
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
@@ -92,12 +167,10 @@ class GoogleCallbackResponse(BaseModel):
     user_id: UUID
     role: str
     full_name: str
-    is_new_user: bool  # True if account was just created via Google
+    is_new_user: bool
     is_subscribed: bool
     is_verified_teacher: bool
 
-
-# ── Generic Message ───────────────────────────────────────────────────────────
 
 class MessageResponse(BaseModel):
     message: str

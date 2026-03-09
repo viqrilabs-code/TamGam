@@ -11,6 +11,10 @@ class HomeworkResponse(BaseModel):
     class_title: str
     teacher_id: UUID
     teacher_name: Optional[str] = None
+    target_student_id: Optional[UUID] = None
+    target_student_name: Optional[str] = None
+    kind: str = "assignment"  # assignment | pre_reading | running_notes | solution
+    generated_by_diya: bool = False
     title: str
     description: Optional[str] = None
     due_at: Optional[datetime] = None
@@ -26,6 +30,10 @@ class HomeworkFeedItem(BaseModel):
     class_id: UUID
     class_title: str
     teacher_name: Optional[str] = None
+    target_student_id: Optional[UUID] = None
+    kind: str = "assignment"  # assignment | pre_reading | running_notes | solution
+    generated_by_diya: bool = False
+    is_submittable: bool = True
     title: str
     description: Optional[str] = None
     due_at: Optional[datetime] = None
@@ -66,3 +74,16 @@ class HomeworkSubmissionResponse(BaseModel):
 
 class HomeworkSubmissionListResponse(BaseModel):
     submissions: List[HomeworkSubmissionResponse]
+
+
+class DiyaGeneratedHomeworkItem(BaseModel):
+    homework_id: UUID
+    student_id: UUID
+    student_name: str
+    title: str
+
+
+class DiyaGenerateHomeworkResponse(BaseModel):
+    class_id: UUID
+    generated_count: int
+    items: List[DiyaGeneratedHomeworkItem]

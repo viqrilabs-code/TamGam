@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="tamgam_primary">#E8640C</color>
+    <color name="tamgam_primary_dark">#BF4F08</color>
+    <color name="tamgam_primary_container">#FFE0CB</color>
+    <color name="tamgam_on_primary">#FFFFFF</color>
+    <color name="tamgam_secondary">#0D5C63</color>
+    <color name="tamgam_text">#1A1A2E</color>
+    <color name="tamgam_text_muted">#5B5A65</color>
+    <color name="tamgam_background">#FDF6EC</color>
+    <color name="tamgam_surface">#FFF9F2</color>
+    <color name="tamgam_card_stroke">#EAD8C3</color>
+    <color name="tamgam_outline">#8A8496</color>
+    <color name="tamgam_status_bg">#F7EFE4</color>
+</resources>

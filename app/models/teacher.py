@@ -51,6 +51,8 @@ class TeacherProfile(Base):
     focus_boards = Column(ARRAY(String), nullable=True)      # e.g. ["CBSE", "ICSE"]
     class_note_tone = Column(String(50), nullable=True)      # concise | detailed | exam_focused
     class_note_preferences = Column(Text, nullable=True)      # How notes should be generated
+    education = Column(JSONB, nullable=True)                  # Structured education records
+    past_job_experiences = Column(JSONB, nullable=True)       # Structured prior work experiences
 
     # ── Verification Status ───────────────────────────────────────────────────
     # is_verified = True → 🟡T mark shown on all posts/profile
@@ -62,6 +64,7 @@ class TeacherProfile(Base):
     total_students = Column(Integer, nullable=False, default=0)
     total_classes = Column(Integer, nullable=False, default=0)
     average_rating = Column(Float, nullable=True)
+    rating_count = Column(Integer, nullable=False, default=0)
 
     # ── Earnings (private — admin + teacher only) ─────────────────────────────
     total_revenue_paise = Column(Integer, nullable=False, default=0)
@@ -107,6 +110,11 @@ class TeacherProfile(Base):
     classes = relationship("Class", back_populates="teacher")
     top_performers = relationship(
         "TopPerformer", back_populates="teacher", cascade="all, delete-orphan"
+    )
+    payouts = relationship(
+        "TeacherPayout",
+        back_populates="teacher",
+        cascade="all, delete-orphan",
     )
 
     def __repr__(self) -> str:

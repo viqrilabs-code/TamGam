@@ -1,0 +1,43 @@
+<resources>
+    <string name="app_name">tamgam</string>
+    <string name="tamgam_diya_logo_content_description">tamgam Diya logo</string>
+    <string name="loading_landing_page">Opening tamgam...</string>
+    <string name="landing_page_error_title">Unable to reach tamgam server</string>
+    <string name="landing_page_error_body">Could not open %1$s. Make sure backend is running and reachable.</string>
+    <string name="retry">Retry</string>
+
+    <string name="phone_auth_title">Verify your phone</string>
+    <string name="phone_auth_subtitle">Secure OTP login for your tamgam account.</string>
+    <string name="phone_auth_helper_text">Didn\'t receive the code? Wait for resend, check mobile network/SIM inbox, and ensure DND/spam filters are not blocking SMS.</string>
+    <string name="phone_number_label">Phone number (E.164)</string>
+    <string name="phone_number_hint">+919876543210</string>
+    <string name="otp_label">OTP</string>
+    <string name="otp_hint">123456</string>
+    <string name="send_otp">Send code</string>
+    <string name="verify_otp">Verify and continue</string>
+    <string name="resend_otp">Resend code</string>
+    <string name="resend_otp_in_seconds">Resend in %1$ds</string>
+
+    <string name="auth_status_idle">Enter your phone number to receive an OTP.</string>
+    <string name="auth_status_sending_otp">Sending OTP...</string>
+    <string name="auth_status_otp_sent">OTP sent. Enter the 6-digit code.</string>
+    <string name="auth_status_otp_sent_to">OTP sent to %1$s. Enter the 6-digit code.</string>
+    <string name="auth_status_auto_verification">Verifying automatically...</string>
+    <string name="auth_status_resend_ready">Didn\'t receive OTP? Tap resend now.</string>
+    <string name="auth_status_signing_in">Verifying OTP and signing you in...</string>
+    <string name="auth_status_login_success">Phone verified. Redirecting...</string>
+    <string name="auth_invalid_phone">Enter a valid phone number in E.164 format (example: +919876543210).</string>
+    <string name="auth_invalid_otp">Enter the 6-digit OTP.</string>
+    <string name="auth_firebase_not_configured">Firebase is not configured in this app build.</string>
+    <string name="auth_otp_send_failed">Unable to send OTP right now.</string>
+    <string name="auth_resend_unavailable">Request OTP once before using resend.</string>
+    <string name="auth_otp_verify_failed">Unable to verify OTP.</string>
+    <string name="auth_error_too_many_requests">Too many OTP requests. Wait a few minutes before trying again.</string>
+    <string name="auth_error_invalid_phone">Invalid phone number format. Use +countrycode format.</string>
+    <string name="auth_error_network">Network issue while sending OTP. Check internet and try again.</string>
+    <string name="auth_error_quota_exceeded">OTP quota exceeded for now. Try later or use a test number.</string>
+    <string name="auth_error_app_not_authorized">App is not authorized for phone auth. Check Firebase SHA-1/SHA-256 and Google Cloud API key restrictions, then reinstall the app.</string>
+    <string name="auth_error_generic_with_code">OTP failed (%1$s). Please retry.</string>
+    <string name="auth_token_exchange_failed">Phone verified, but backend login failed.</string>
+    <string name="auth_backend_http_error">Backend login failed (HTTP %1$d).</string>
+</resources>

@@ -1,4 +1,4 @@
-# TamGam -- requirements.txt
+# tamgam -- requirements.txt
 # Python 3.13 compatible
 # Generated: 2026-02-14
 
@@ -23,6 +23,7 @@ python-jose[cryptography]==3.5.0
 passlib[bcrypt]==1.7.4
 authlib==1.6.8
 httpx==0.28.1
+firebase-admin==7.1.0
 
 # GCP Services
 # NOTE: google-cloud-aiplatform>=1.100.0 requires google-auth>=2.47.0

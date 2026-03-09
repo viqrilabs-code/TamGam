@@ -51,7 +51,8 @@ class StudentAssessment(Base):
     student_id = Column(
         UUID(as_uuid=True),
         ForeignKey("student_profiles.id", ondelete="CASCADE"),
-        nullable=False,
+        # Null for class template records (shared assessment blueprint).
+        nullable=True,
         index=True,
     )
     class_id = Column(

@@ -13,6 +13,8 @@ from typing import Generator
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 
+from app.core.config import settings
+
 
 def _build_database_url() -> str:
     """
@@ -23,7 +25,7 @@ def _build_database_url() -> str:
                    DB_USER, DB_PASS, DB_NAME, DB_CONNECTION_NAME env vars
                    (these are injected by Cloud Run from Secret Manager)
     """
-    app_env = os.getenv("APP_ENV", "development")
+    app_env = settings.app_env
 
     if app_env == "production":
         db_user = os.environ["DB_USER"]
@@ -55,10 +57,10 @@ def _build_database_url() -> str:
 engine = create_engine(
     _build_database_url(),
     pool_pre_ping=True,
-    pool_size=5,
-    max_overflow=10,
-    pool_recycle=1800,  # Recycle connections every 30 min
-    echo=os.getenv("APP_ENV") != "production",  # SQL logging in dev only
+    pool_size=settings.db_pool_size,
+    max_overflow=settings.db_max_overflow,
+    pool_recycle=settings.db_pool_recycle_seconds,
+    echo=settings.app_env != "production",
 )
 
 # ── Session Factory ───────────────────────────────────────────────────────────

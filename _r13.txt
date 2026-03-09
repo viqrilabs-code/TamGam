@@ -1,0 +1,20 @@
+
+
+Default STARTUP TCP probe succeeded after 1 attempt for container "tamgam-api-1" on port 8000.
+INFO  [alembic.runtime.migration] Running upgrade 20260222_0009 -> 20260222_0010, batch visibility controls and tuition request batch selection
+INFO  [alembic.runtime.migration] Running upgrade 20260222_0008 -> 20260222_0009, add default timing to batches
+INFO  [alembic.runtime.migration] Running upgrade 20260221_0007 -> 20260222_0008, add grade_level to batches
+INFO  [alembic.runtime.migration] Running upgrade 20260221_0006 -> 20260221_0007, add subscription cancel flag and past_due enum value
+INFO  [alembic.runtime.migration] Running upgrade 20260221_0005 -> 20260221_0006, add pending_unenroll_at to enrollments
+INFO  [alembic.runtime.migration] Running upgrade 20260221_0004 -> 20260221_0005, add student_note_requests table
+INFO  [alembic.runtime.migration] Running upgrade 20260221_0003 -> 20260221_0004, add homework_submissions table
+INFO  [alembic.runtime.migration] Running upgrade 20260220_0002 -> 20260221_0003, add homeworks table
+INFO  [alembic.runtime.migration] Running upgrade 20260218_0001 -> 20260220_0002, add student and teacher personalization profile fields
+INFO  [alembic.runtime.migration] Running upgrade ae3c52967305 -> 20260218_0001, add books table and book_chunk embedding type
+INFO  [alembic.runtime.migration] Running upgrade  -> ae3c52967305, initial_schema
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+2026-02-24 18:02:45 | INFO     | tamgam.main | Starting tamgam v1.0.0 [production]
+INFO:     Waiting for application startup.
+INFO:     Started server process [2]
+Starting new instance. Reason: DEPLOYMENT_ROLLOUT - Instance started due to traffic shifting between revisions due to deployment, traffic split adjustment, or deployment health check.

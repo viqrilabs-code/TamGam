@@ -55,7 +55,7 @@ class ContentEmbedding(Base):
 
     # ── Class Context ─────────────────────────────────────────────────────────
     # Denormalised for fast filtering by class without joins.
-    # NULL for ncert_book rows (not tied to any specific TamGam class).
+    # NULL for ncert_book rows (not tied to any specific tamgam class).
     class_id = Column(
         UUID(as_uuid=True),
         ForeignKey("classes.id", ondelete="CASCADE"),

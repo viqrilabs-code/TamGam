@@ -13,3 +13,5 @@ tamgam-frontend/
 static/
 architecture.html
 README.md
+.env
+.env.*

@@ -5,8 +5,8 @@ from datetime import datetime, timedelta, timezone
 from typing import List
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import and_
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 import app.db.base  # noqa: F401
@@ -16,10 +16,16 @@ from app.core.dependencies import (
 )
 from app.db.session import get_db
 from app.models.student import BatchMember, Enrollment, StudentProfile, Batch
+from app.models.assessment import StudentUnderstandingProfile
+from app.models.teacher_rating import TeacherRating
 from app.models.teacher import TeacherProfile
 from app.models.notification import Notification
-from app.models.subscription import Plan
 from app.models.user import User
+from app.schemas.teacher_rating import (
+    TeacherRatingEligibilityResponse,
+    TeacherRatingResponse,
+    TeacherRatingUpsertRequest,
+)
 from app.schemas.student import (
     BatchResponse,
     EnrollmentResponse,
@@ -31,9 +37,10 @@ from app.schemas.student import (
 )
 
 router = APIRouter()
+MIN_DAYS_BEFORE_RATING = 30
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _get_student_profile_or_404(user_id, db: Session) -> StudentProfile:
     profile = db.query(StudentProfile).filter(StudentProfile.user_id == user_id).first()
@@ -43,17 +50,10 @@ def _get_student_profile_or_404(user_id, db: Session) -> StudentProfile:
 
 
 def _is_subscribed(user_id, db: Session) -> bool:
+    user = db.query(User).filter(User.id == user_id).first()
+    if user and user.role == "student":
+        return True
     return get_effective_active_subscription(user_id, db) is not None
-
-
-def _get_active_subscription_with_plan(user_id, db: Session):
-    active_sub = get_effective_active_subscription(user_id, db)
-    if not active_sub:
-        return None
-    plan = db.query(Plan).filter(Plan.id == active_sub.plan_id).first()
-    if not plan:
-        return None
-    return active_sub, plan
 
 
 def _sync_due_unenrollments(
@@ -85,34 +85,10 @@ def _sync_due_unenrollments(
     db.flush()
 
 
-def _plan_enrollment_limit(plan_slug: str) -> int:
-    limits = {
-        "basic": 1,
-        "standard": 2,
-        "pro": 3,
-    }
-    return limits.get((plan_slug or "").lower(), 1)
-
-
-def _enforce_plan_enrollment_cap(student_profile_id: UUID, plan_slug: str, db: Session):
-    limit = _plan_enrollment_limit(plan_slug)
-    active_enrollments = db.query(Enrollment).filter(
-        and_(
-            Enrollment.student_id == student_profile_id,
-            Enrollment.is_active == True,
-        )
-    ).count()
-    if active_enrollments >= limit:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Your {(plan_slug or 'current').title()} plan allows up to {limit} "
-                f"active tuition enrollment(s) at a time."
-            ),
-        )
-
-
 def _build_private_profile(profile: StudentProfile, user: User, db: Session) -> StudentProfilePrivate:
+    understanding = db.query(StudentUnderstandingProfile).filter(
+        StudentUnderstandingProfile.student_id == profile.id
+    ).order_by(StudentUnderstandingProfile.updated_at.desc()).first()
     return StudentProfilePrivate(
         id=profile.id,
         user_id=profile.user_id,
@@ -127,6 +103,7 @@ def _build_private_profile(profile: StudentProfile, user: User, db: Session) -> 
         improvement_areas=profile.improvement_areas,
         learning_goals=profile.learning_goals,
         weekly_study_hours=profile.weekly_study_hours,
+        understanding_level=(int(understanding.current_level) if understanding and understanding.current_level is not None else None),
         performance_score=profile.performance_score,
         badges=profile.badges,
         streak_days=profile.streak_days,
@@ -142,7 +119,67 @@ def _build_private_profile(profile: StudentProfile, user: User, db: Session) -> 
     )
 
 
-# ── Profile Endpoints ─────────────────────────────────────────────────────────
+def _to_rating_response(row: TeacherRating) -> TeacherRatingResponse:
+    return TeacherRatingResponse(
+        id=row.id,
+        teacher_id=row.teacher_id,
+        student_id=row.student_id,
+        rating=row.rating,
+        comment=(row.comment or "").strip() or None,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _refresh_teacher_rating_snapshot(teacher_id: UUID, db: Session) -> None:
+    avg_value, count_value = db.query(
+        func.avg(TeacherRating.rating),
+        func.count(TeacherRating.id),
+    ).filter(
+        TeacherRating.teacher_id == teacher_id
+    ).one()
+
+    profile = db.query(TeacherProfile).filter(TeacherProfile.id == teacher_id).first()
+    if not profile:
+        return
+    profile.average_rating = float(avg_value) if avg_value is not None else None
+    profile.rating_count = int(count_value or 0)
+
+
+def _rating_eligibility(
+    *,
+    student_profile_id: UUID,
+    teacher_id: UUID,
+    db: Session,
+) -> tuple[bool, bool, datetime | None, int, str | None]:
+    enrollment = db.query(Enrollment).filter(
+        and_(
+            Enrollment.student_id == student_profile_id,
+            Enrollment.teacher_id == teacher_id,
+            Enrollment.is_active == True,
+        )
+    ).order_by(Enrollment.enrolled_at.asc()).first()
+
+    if not enrollment:
+        return False, False, None, 0, "You can rate only teachers you are actively enrolled with."
+
+    eligible_from = enrollment.enrolled_at + timedelta(days=MIN_DAYS_BEFORE_RATING)
+    now = datetime.now(timezone.utc)
+    if now >= eligible_from:
+        return True, True, eligible_from, 0, None
+
+    delta = eligible_from - now
+    days_remaining = int(delta.total_seconds() // 86400)
+    if (delta.total_seconds() % 86400) > 0:
+        days_remaining += 1
+    reason = (
+        f"Rating unlocks after {MIN_DAYS_BEFORE_RATING} days from enrollment. "
+        f"You can rate from {eligible_from.date().isoformat()}."
+    )
+    return True, False, eligible_from, max(0, days_remaining), reason
+
+
+# â”€â”€ Profile Endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get(
     "/me",
@@ -204,6 +241,9 @@ def get_student_public(student_id: UUID, db: Session = Depends(get_db)):
     if not profile:
         raise HTTPException(status_code=404, detail="Student not found.")
     user = db.query(User).filter(User.id == profile.user_id).first()
+    understanding = db.query(StudentUnderstandingProfile).filter(
+        StudentUnderstandingProfile.student_id == profile.id
+    ).order_by(StudentUnderstandingProfile.updated_at.desc()).first()
     return StudentProfilePublic(
         id=profile.id,
         user_id=profile.user_id,
@@ -218,13 +258,14 @@ def get_student_public(student_id: UUID, db: Session = Depends(get_db)):
         improvement_areas=profile.improvement_areas,
         learning_goals=profile.learning_goals,
         weekly_study_hours=profile.weekly_study_hours,
+        understanding_level=(int(understanding.current_level) if understanding and understanding.current_level is not None else None),
         performance_score=profile.performance_score,
         badges=profile.badges,
         streak_days=profile.streak_days,
     )
 
 
-# ── Enrollment Endpoints ──────────────────────────────────────────────────────
+# â”€â”€ Enrollment Endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get(
     "/me/enrollments",
@@ -281,28 +322,14 @@ def enroll_with_teacher(
 ):
     """
     Enroll with a teacher for a specific subject.
-    Requires an active subscription.
+    Students are free by default.
     Cannot enroll with the same teacher for the same subject twice.
     """
     if current_user.role != "student":
         raise HTTPException(status_code=403, detail="Student access only.")
 
-    # Check subscription
-    active_sub = _get_active_subscription_with_plan(current_user.id, db)
-    if not active_sub:
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "message": "An active subscription is required to enroll with a teacher.",
-                "cta": "View plans",
-                "redirect": "/pricing",
-            },
-        )
-    _, plan = active_sub
-
     profile = _get_student_profile_or_404(current_user.id, db)
     _sync_due_unenrollments(db, student_profile_id=profile.id)
-    _enforce_plan_enrollment_cap(profile.id, plan.slug, db)
 
     # Check teacher exists
     teacher_profile = db.query(TeacherProfile).filter(
@@ -459,7 +486,113 @@ def unenroll(
     )
 
 
-# ── Batch Endpoints ───────────────────────────────────────────────────────────
+@router.get(
+    "/me/teacher-ratings/{teacher_id}/eligibility",
+    response_model=TeacherRatingEligibilityResponse,
+    summary="Check whether current student can rate a teacher",
+)
+def get_teacher_rating_eligibility(
+    teacher_id: UUID,
+    current_user: User = Depends(require_login),
+    db: Session = Depends(get_db),
+):
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="Student access only.")
+
+    student_profile = _get_student_profile_or_404(current_user.id, db)
+    teacher = db.query(TeacherProfile).filter(TeacherProfile.id == teacher_id).first()
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Teacher not found.")
+
+    is_enrolled, can_rate, eligible_from, days_remaining, reason = _rating_eligibility(
+        student_profile_id=student_profile.id,
+        teacher_id=teacher_id,
+        db=db,
+    )
+    existing = db.query(TeacherRating).filter(
+        and_(
+            TeacherRating.teacher_id == teacher_id,
+            TeacherRating.student_id == student_profile.id,
+        )
+    ).first()
+
+    return TeacherRatingEligibilityResponse(
+        teacher_id=teacher_id,
+        is_enrolled=is_enrolled,
+        can_rate=can_rate,
+        eligible_from=eligible_from,
+        days_remaining=days_remaining,
+        reason=reason,
+        existing_rating=_to_rating_response(existing) if existing else None,
+    )
+
+
+@router.post(
+    "/me/teacher-ratings/{teacher_id}",
+    response_model=TeacherRatingResponse,
+    summary="Create or update rating for an enrolled teacher",
+)
+def upsert_teacher_rating(
+    teacher_id: UUID,
+    payload: TeacherRatingUpsertRequest,
+    current_user: User = Depends(require_login),
+    db: Session = Depends(get_db),
+):
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="Student access only.")
+
+    student_profile = _get_student_profile_or_404(current_user.id, db)
+    teacher = db.query(TeacherProfile).filter(TeacherProfile.id == teacher_id).first()
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Teacher not found.")
+
+    is_enrolled, can_rate, eligible_from, _, reason = _rating_eligibility(
+        student_profile_id=student_profile.id,
+        teacher_id=teacher_id,
+        db=db,
+    )
+    if not is_enrolled:
+        raise HTTPException(status_code=403, detail=reason or "Enrollment required before rating.")
+    if not can_rate:
+        raise HTTPException(
+            status_code=409,
+            detail=reason or f"You can rate from {eligible_from.date().isoformat()}.",
+        )
+
+    comment = (payload.comment or "").strip() or None
+    if comment and len(comment) > 1000:
+        raise HTTPException(status_code=422, detail="Comment must be 1000 characters or less.")
+
+    row = db.query(TeacherRating).filter(
+        and_(
+            TeacherRating.teacher_id == teacher_id,
+            TeacherRating.student_id == student_profile.id,
+        )
+    ).first()
+    now = datetime.now(timezone.utc)
+
+    if row:
+        row.rating = payload.rating
+        row.comment = comment
+        row.updated_at = now
+    else:
+        row = TeacherRating(
+            teacher_id=teacher_id,
+            student_id=student_profile.id,
+            rating=payload.rating,
+            comment=comment,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(row)
+
+    _refresh_teacher_rating_snapshot(teacher_id, db)
+    db.commit()
+    db.refresh(row)
+    return _to_rating_response(row)
+
+
+# Batch Endpoints
 
 @router.get(
     "/me/batches",
@@ -494,8 +627,11 @@ def list_my_batches(
             teacher_id=teacher_profile.id,
             teacher_name=teacher_user.full_name,
             subject=batch.subject,
+            fee_paise=int(batch.fee_paise or 0),
+            fee_rupees=(batch.fee_paise or 0) / 100,
             is_active=batch.is_active,
             joined_at=member.joined_at,
         )
         for member, batch, teacher_profile, teacher_user in results
     ]
+

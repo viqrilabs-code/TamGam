@@ -1,11 +1,13 @@
 from datetime import datetime, timezone
+import json
+from io import BytesIO
 from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
-from sqlalchemy import and_
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, or_
+from sqlalchemy.orm import Session, aliased
 
 import app.db.base  # noqa: F401
 from app.core.dependencies import require_login, require_teacher
@@ -14,16 +16,19 @@ from app.models.assessment import StudentAssessment, StudentUnderstandingProfile
 from app.models.class_ import Class
 from app.models.homework import Homework, HomeworkSubmission
 from app.models.notification import Notification
-from app.models.student import Enrollment, StudentProfile
+from app.models.student import BatchMember, Enrollment, StudentProfile
 from app.models.teacher import TeacherProfile
 from app.models.user import User
 from app.schemas.homework import (
+    DiyaGenerateHomeworkResponse,
+    DiyaGeneratedHomeworkItem,
     HomeworkFeedItem,
     HomeworkFeedResponse,
     HomeworkResponse,
     HomeworkSubmissionListResponse,
     HomeworkSubmissionResponse,
 )
+from app.services.gemini_key_manager import generate_with_fallback
 
 router = APIRouter()
 NIL_UUID = UUID("00000000-0000-0000-0000-000000000000")
@@ -35,6 +40,17 @@ ALLOWED_MIME_EXACT = {
 }
 ALLOWED_IMAGE_PREFIX = "image/"
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".png", ".jpg", ".jpeg", ".webp"}
+ALLOWED_DIYA_TEXT_EXTENSIONS = {".txt", ".md", ".docx", ".pdf"}
+HOMEWORK_KIND_ASSIGNMENT = "assignment"
+HOMEWORK_KIND_PRE_READING = "pre_reading"
+HOMEWORK_KIND_RUNNING_NOTES = "running_notes"
+HOMEWORK_KIND_SOLUTION = "solution"
+HOMEWORK_KINDS = {
+    HOMEWORK_KIND_ASSIGNMENT,
+    HOMEWORK_KIND_PRE_READING,
+    HOMEWORK_KIND_RUNNING_NOTES,
+    HOMEWORK_KIND_SOLUTION,
+}
 
 
 def _file_ext(name: str) -> str:
@@ -89,13 +105,229 @@ def _can_student_access_class(student_user_id: UUID, class_id: UUID, db: Session
     return enrollment is not None
 
 
-def _homework_to_response(hw: Homework, teacher_name: Optional[str], class_title: Optional[str]) -> HomeworkResponse:
+def _normalize_kind(raw: Optional[str]) -> str:
+    kind = str(raw or HOMEWORK_KIND_ASSIGNMENT).strip().lower()
+    if kind not in HOMEWORK_KINDS:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Invalid homework kind. Allowed: "
+                "assignment, pre_reading, running_notes, solution."
+            ),
+        )
+    return kind
+
+
+def _is_submittable_kind(kind: Optional[str]) -> bool:
+    return str(kind or HOMEWORK_KIND_ASSIGNMENT).strip().lower() == HOMEWORK_KIND_ASSIGNMENT
+
+
+def _can_student_access_homework(student_profile_id: UUID, hw: Homework) -> bool:
+    if hw.target_student_id is None:
+        return True
+    return str(hw.target_student_id) == str(student_profile_id)
+
+
+def _extract_text_from_uploaded_file(file_name: str, file_bytes: bytes) -> str:
+    lower = (file_name or "").lower()
+    if lower.endswith(".txt") or lower.endswith(".md"):
+        try:
+            return file_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            return file_bytes.decode("latin-1", errors="ignore")
+    if lower.endswith(".docx"):
+        try:
+            from docx import Document
+
+            doc = Document(BytesIO(file_bytes))
+            return "\n".join(p.text.strip() for p in doc.paragraphs if p.text and p.text.strip())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Could not parse DOCX file: {exc}") from exc
+    if lower.endswith(".pdf"):
+        try:
+            from pypdf import PdfReader
+
+            reader = PdfReader(BytesIO(file_bytes))
+            pages = []
+            for page in reader.pages:
+                pages.append((page.extract_text() or "").strip())
+            return "\n".join(p for p in pages if p)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Could not parse PDF file: {exc}") from exc
+    raise HTTPException(status_code=415, detail="Unsupported file type. Allowed: .txt, .md, .docx, .pdf")
+
+
+async def _read_required_diya_context_file(file: Optional[UploadFile], field_label: str) -> tuple[str, str]:
+    if file is None:
+        raise HTTPException(status_code=422, detail=f"{field_label} file is required.")
+    file_name = file.filename or "context"
+    ext = _file_ext(file_name)
+    if ext not in ALLOWED_DIYA_TEXT_EXTENSIONS:
+        raise HTTPException(status_code=415, detail=f"Unsupported {field_label} file type. Allowed: .txt, .md, .docx, .pdf")
+    file_bytes = await file.read()
+    size = len(file_bytes or b"")
+    if size == 0:
+        raise HTTPException(status_code=400, detail=f"Uploaded {field_label} file is empty.")
+    if size > (4 * 1024 * 1024):
+        raise HTTPException(status_code=413, detail=f"{field_label} file too large. Max size is 4 MB.")
+    text = _extract_text_from_uploaded_file(file_name, file_bytes).strip()
+    if not text:
+        raise HTTPException(status_code=400, detail=f"Could not extract text from {field_label} file.")
+    return file_name, text
+
+
+def _safe_str_list(items: Optional[list[str]]) -> str:
+    values = [str(i).strip() for i in (items or []) if str(i).strip()]
+    return ", ".join(values) if values else "Not available"
+
+
+def _student_latest_profile_snapshot(student_id: UUID, db: Session) -> tuple[Optional[float], Optional[int]]:
+    rows = db.query(StudentUnderstandingProfile).filter(
+        StudentUnderstandingProfile.student_id == student_id
+    ).all()
+    latest_score: Optional[float] = None
+    latest_level: Optional[int] = None
+    latest_ts: Optional[datetime] = None
+    for profile in rows:
+        if profile.current_level is not None:
+            latest_level = int(profile.current_level)
+        for item in (profile.recent_scores or []):
+            if not isinstance(item, dict):
+                continue
+            ts_raw = item.get("ts")
+            score_raw = item.get("score")
+            if score_raw is None:
+                continue
+            try:
+                score = float(score_raw)
+            except Exception:
+                continue
+            try:
+                ts = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00")) if ts_raw else None
+            except Exception:
+                ts = None
+            if latest_ts is None or (ts and ts > latest_ts):
+                latest_ts = ts or latest_ts
+                latest_score = score
+    return latest_score, latest_level
+
+
+def _extract_json_object(raw: str) -> dict:
+    text = (raw or "").strip()
+    if not text:
+        raise ValueError("empty model response")
+    if text.startswith("```"):
+        text = text.strip("`")
+        if "\n" in text:
+            text = text.split("\n", 1)[1]
+    text = text.strip()
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        parsed = json.loads(text[start : end + 1])
+        if isinstance(parsed, dict):
+            return parsed
+    raise ValueError("invalid json object")
+
+
+def _generate_personalized_homework_content(
+    *,
+    class_title: str,
+    subject: str,
+    topic: str,
+    student_name: str,
+    grade: Optional[int],
+    strengths: list[str],
+    improvement_areas: list[str],
+    performance_score: Optional[float],
+    understanding_level: Optional[int],
+    previous_year_questions_text: str,
+    student_report_text: str,
+) -> tuple[str, str]:
+    prompt = f"""
+You are Diya, creating personalized homework for an Indian school student.
+
+Goal:
+- Create ONE student-specific homework from the class topic.
+- Adapt to strengths and weaknesses.
+- Use previous year questions and student report context.
+- Ensure homework differs meaningfully from other students.
+
+Class context:
+- Class title: {class_title}
+- Subject: {subject}
+- Topic: {topic}
+
+Student context:
+- Name: {student_name}
+- Grade: {grade if grade is not None else "Unknown"}
+- Strengths: {_safe_str_list(strengths)}
+- Improvement areas: {_safe_str_list(improvement_areas)}
+- Performance score: {performance_score if performance_score is not None else "Unknown"}
+- Understanding level (1-5): {understanding_level if understanding_level is not None else "Unknown"}
+
+Previous year questions context:
+{previous_year_questions_text[:12000]}
+
+Student report context:
+{student_report_text[:12000]}
+
+Return strict JSON only:
+{{
+  "title": "short homework title",
+  "description": "Detailed homework instructions with 6-10 tasks. Include mixed difficulty and exam-style items. Mention why it fits this student."
+}}
+No markdown.
+    """
+    try:
+        raw = generate_with_fallback(prompt, model_name="gemini-2.0-flash")
+        parsed = _extract_json_object(raw or "")
+        title = str(parsed.get("title") or "").strip()
+        description = str(parsed.get("description") or "").strip()
+        if not title or not description:
+            raise ValueError("Missing title/description")
+        return title, description
+    except Exception:
+        topic_clean = (topic or "Practice").strip()
+        title = f"{topic_clean} Personalized Homework - {student_name}"
+        strengths_text = _safe_str_list(strengths)
+        weaknesses_text = _safe_str_list(improvement_areas)
+        description = (
+            f"Topic: {topic_clean}\n"
+            f"Student profile focus: Strengths ({strengths_text}); Improvement areas ({weaknesses_text}).\n\n"
+            "Tasks:\n"
+            "1. Solve 3 easy warm-up questions from this topic.\n"
+            "2. Solve 3 standard exam-style questions with full steps.\n"
+            "3. Solve 2 higher-order application questions.\n"
+            "4. Write short reflection: where you struggled and why.\n"
+            "5. Re-attempt one question from mistakes using corrected method.\n\n"
+            "This homework is individualized using student performance and report context."
+        )
+        return title, description
+
+
+def _homework_to_response(
+    hw: Homework,
+    teacher_name: Optional[str],
+    class_title: Optional[str],
+    target_student_name: Optional[str] = None,
+) -> HomeworkResponse:
     return HomeworkResponse(
         id=hw.id,
         class_id=hw.class_id,
         class_title=class_title or "Class",
         teacher_id=hw.teacher_id,
         teacher_name=teacher_name,
+        target_student_id=hw.target_student_id,
+        target_student_name=target_student_name,
+        kind=hw.kind or HOMEWORK_KIND_ASSIGNMENT,
+        generated_by_diya=bool(hw.generated_by_diya),
         title=hw.title,
         description=hw.description,
         due_at=hw.due_at,
@@ -132,6 +364,33 @@ def _submission_to_response(
     )
 
 
+def _class_students_for_personalization(cls: Class, teacher_id: UUID, db: Session) -> list[tuple[StudentProfile, User]]:
+    rows: list[tuple[StudentProfile, User]] = []
+    if cls.batch_id:
+        rows = db.query(StudentProfile, User).join(
+            BatchMember, BatchMember.student_id == StudentProfile.id
+        ).join(
+            User, User.id == StudentProfile.user_id
+        ).filter(
+            BatchMember.batch_id == cls.batch_id
+        ).all()
+    else:
+        rows = db.query(StudentProfile, User).join(
+            Enrollment, Enrollment.student_id == StudentProfile.id
+        ).join(
+            User, User.id == StudentProfile.user_id
+        ).filter(
+            and_(
+                Enrollment.teacher_id == teacher_id,
+                Enrollment.is_active == True,
+            )
+        ).all()
+    dedup: dict[str, tuple[StudentProfile, User]] = {}
+    for sp, su in rows:
+        dedup[str(sp.id)] = (sp, su)
+    return list(dedup.values())
+
+
 @router.post(
     "/classes/{class_id}",
     response_model=HomeworkResponse,
@@ -142,6 +401,9 @@ async def create_homework(
     title: str = Form(...),
     description: Optional[str] = Form(None),
     due_at: Optional[datetime] = Form(None),
+    kind: Optional[str] = Form(HOMEWORK_KIND_ASSIGNMENT),
+    target_student_id: Optional[UUID] = Form(None),
+    generated_by_diya: Optional[bool] = Form(False),
     file: Optional[UploadFile] = File(None),
     current_user: User = Depends(require_teacher),
     db: Session = Depends(get_db),
@@ -156,14 +418,45 @@ async def create_homework(
     clean_title = (title or "").strip()
     if not clean_title:
         raise HTTPException(status_code=422, detail="Homework title is required.")
+    normalized_kind = _normalize_kind(kind)
+    target_student: Optional[StudentProfile] = None
+    target_student_user: Optional[User] = None
+    if target_student_id is not None:
+        target_student = db.query(StudentProfile).filter(StudentProfile.id == target_student_id).first()
+        if not target_student:
+            raise HTTPException(status_code=404, detail="Target student not found.")
+        target_student_user = db.query(User).filter(User.id == target_student.user_id).first()
+        if cls.batch_id:
+            member = db.query(BatchMember).filter(
+                and_(
+                    BatchMember.batch_id == cls.batch_id,
+                    BatchMember.student_id == target_student.id,
+                )
+            ).first()
+            if not member:
+                raise HTTPException(status_code=403, detail="Target student is not part of this class batch.")
+        else:
+            enrollment = db.query(Enrollment).filter(
+                and_(
+                    Enrollment.teacher_id == teacher.id,
+                    Enrollment.student_id == target_student.id,
+                    Enrollment.is_active == True,
+                )
+            ).first()
+            if not enrollment:
+                raise HTTPException(status_code=403, detail="Target student is not actively enrolled with this teacher.")
+
     file_name, file_mime, file_size_bytes, file_bytes = await _read_optional_file(file)
 
     hw = Homework(
         class_id=cls.id,
         teacher_id=teacher.id,
+        target_student_id=target_student.id if target_student else None,
+        kind=normalized_kind,
+        generated_by_diya=bool(generated_by_diya),
         title=clean_title,
         description=(description or "").strip() or None,
-        due_at=due_at,
+        due_at=due_at if _is_submittable_kind(normalized_kind) else None,
         file_name=file_name,
         file_mime=file_mime,
         file_size_bytes=file_size_bytes,
@@ -172,7 +465,115 @@ async def create_homework(
     db.add(hw)
     db.commit()
     db.refresh(hw)
-    return _homework_to_response(hw, current_user.full_name, cls.title)
+    return _homework_to_response(
+        hw,
+        current_user.full_name,
+        cls.title,
+        target_student_name=target_student_user.full_name if target_student_user else None,
+    )
+
+
+@router.post(
+    "/classes/{class_id}/generate-diya",
+    response_model=DiyaGenerateHomeworkResponse,
+    summary="Generate personalized homework with Diya for each student in class (teacher only)",
+)
+async def generate_diya_homework_for_class(
+    class_id: UUID,
+    topic: str = Form(...),
+    due_at: Optional[datetime] = Form(None),
+    previous_year_questions_file: UploadFile = File(...),
+    student_report_file: UploadFile = File(...),
+    current_user: User = Depends(require_teacher),
+    db: Session = Depends(get_db),
+):
+    teacher = _teacher_profile_for_user(current_user.id, db)
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Teacher profile not found.")
+    cls = db.query(Class).filter(and_(Class.id == class_id, Class.teacher_id == teacher.id)).first()
+    if not cls:
+        raise HTTPException(status_code=404, detail="Class not found.")
+
+    topic_clean = (topic or "").strip()
+    if not topic_clean:
+        raise HTTPException(status_code=422, detail="Topic is required.")
+
+    _, previous_year_text = await _read_required_diya_context_file(previous_year_questions_file, "previous year questions")
+    _, report_text = await _read_required_diya_context_file(student_report_file, "student report")
+
+    student_rows = _class_students_for_personalization(cls, teacher.id, db)
+    if not student_rows:
+        raise HTTPException(status_code=409, detail="No students found for this class.")
+
+    created: list[DiyaGeneratedHomeworkItem] = []
+    seen_titles: set[str] = set()
+    for sp, su in student_rows:
+        latest_score, latest_level = _student_latest_profile_snapshot(sp.id, db)
+        title, description = _generate_personalized_homework_content(
+            class_title=cls.title,
+            subject=cls.subject,
+            topic=topic_clean,
+            student_name=su.full_name,
+            grade=sp.grade,
+            strengths=list(sp.strengths or []),
+            improvement_areas=list(sp.improvement_areas or []),
+            performance_score=latest_score if latest_score is not None else sp.performance_score,
+            understanding_level=latest_level,
+            previous_year_questions_text=previous_year_text,
+            student_report_text=report_text,
+        )
+
+        if title.lower() in seen_titles:
+            title = f"{title} - {su.full_name.split()[0]}"
+        seen_titles.add(title.lower())
+
+        hw = Homework(
+            class_id=cls.id,
+            teacher_id=teacher.id,
+            target_student_id=sp.id,
+            kind=HOMEWORK_KIND_ASSIGNMENT,
+            generated_by_diya=True,
+            title=title,
+            description=description,
+            due_at=due_at,
+            file_name=None,
+            file_mime=None,
+            file_size_bytes=None,
+            file_bytes=None,
+        )
+        db.add(hw)
+        db.flush()
+
+        db.add(
+            Notification(
+                user_id=su.id,
+                notification_type="announcement",
+                title=f"New personalized homework: {cls.title}",
+                body=f"{current_user.full_name} assigned Diya-generated homework for topic '{topic_clean}'.",
+                action_url="/dashboard.html#homework-section",
+                extra_data={
+                    "kind": "homework_personalized_diya",
+                    "homework_id": str(hw.id),
+                    "class_id": str(cls.id),
+                },
+            )
+        )
+
+        created.append(
+            DiyaGeneratedHomeworkItem(
+                homework_id=hw.id,
+                student_id=sp.id,
+                student_name=su.full_name,
+                title=title,
+            )
+        )
+
+    db.commit()
+    return DiyaGenerateHomeworkResponse(
+        class_id=cls.id,
+        generated_count=len(created),
+        items=created,
+    )
 
 
 @router.post(
@@ -197,6 +598,10 @@ async def submit_homework(
         raise HTTPException(status_code=404, detail="Homework not found.")
     if not _can_student_access_class(current_user.id, hw.class_id, db):
         raise HTTPException(status_code=403, detail="You are not enrolled for this class.")
+    if not _can_student_access_homework(sp.id, hw):
+        raise HTTPException(status_code=403, detail="This homework is not assigned to your profile.")
+    if not _is_submittable_kind(hw.kind):
+        raise HTTPException(status_code=409, detail="Submissions are not required for this item.")
 
     text_value = (submission_text or "").strip() or None
     file_name, file_mime, file_size_bytes, file_bytes = await _read_optional_file(file)
@@ -206,6 +611,11 @@ async def submit_homework(
     sub = db.query(HomeworkSubmission).filter(
         and_(HomeworkSubmission.homework_id == homework_id, HomeworkSubmission.student_id == sp.id)
     ).first()
+    if sub and sub.feedback_given_at is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Homework is already reviewed by teacher and cannot be resubmitted.",
+        )
     if not sub:
         sub = HomeworkSubmission(
             homework_id=homework_id,
@@ -233,7 +643,7 @@ async def submit_homework(
                 notification_type="announcement",
                 title=f"Homework submitted: {hw.title}",
                 body=f"{current_user.full_name} submitted homework for class {hw.class_id}.",
-                action_url="/teacher-dashboard.html#tution-requests",
+                action_url="/teacher-dashboard.html#notifications-panel",
                 extra_data={
                     "kind": "homework_submitted",
                     "homework_id": str(hw.id),
@@ -295,8 +705,8 @@ def provide_feedback(
             Notification(
                 user_id=student_user.id,
                 notification_type="announcement",
-                title=f"Homework feedback: {hw.title}",
-                body=f"{current_user.full_name} shared feedback on your homework submission.",
+                title=f"Homework evaluated: {hw.title}",
+                body=f"{current_user.full_name} evaluated your homework and shared feedback.",
                 action_url="/dashboard.html#homework-section",
                 extra_data={
                     "kind": "homework_feedback",
@@ -328,12 +738,25 @@ def list_teacher_homework(
     teacher = _teacher_profile_for_user(current_user.id, db)
     if not teacher:
         return []
-    rows = db.query(Homework, Class).join(
+    target_user = aliased(User)
+    rows = db.query(Homework, Class, target_user).join(
         Class, Class.id == Homework.class_id
+    ).outerjoin(
+        StudentProfile, StudentProfile.id == Homework.target_student_id
+    ).outerjoin(
+        target_user, target_user.id == StudentProfile.user_id
     ).filter(
         Homework.teacher_id == teacher.id
     ).order_by(Homework.created_at.desc()).all()
-    return [_homework_to_response(hw, current_user.full_name, cls.title if cls else None) for hw, cls in rows]
+    return [
+        _homework_to_response(
+            hw,
+            current_user.full_name,
+            cls.title if cls else None,
+            target_student_name=target_u.full_name if target_u else None,
+        )
+        for hw, cls, target_u in rows
+    ]
 
 
 @router.get(
@@ -383,34 +806,62 @@ def student_feed(
     if not sp:
         raise HTTPException(status_code=404, detail="Student profile not found.")
 
-    teacher_ids = [tid for (tid,) in db.query(Enrollment.teacher_id).filter(
+    active_teacher_ids = [tid for (tid,) in db.query(Enrollment.teacher_id).filter(
         and_(Enrollment.student_id == sp.id, Enrollment.is_active == True)
     ).all()]
-    if not teacher_ids:
-        return HomeworkFeedResponse(items=[])
+    # Keep active teachers for current pending work, but also include homework
+    # that this student already submitted in the past (historical feedback view).
+    homework_map: dict[str, tuple[Homework, Class, User]] = {}
+    if active_teacher_ids:
+        active_homework_rows = db.query(Homework, Class, User).join(
+            Class, Class.id == Homework.class_id
+        ).join(
+            TeacherProfile, TeacherProfile.id == Homework.teacher_id
+        ).join(
+            User, User.id == TeacherProfile.user_id
+        ).filter(
+            and_(
+                Homework.teacher_id.in_(active_teacher_ids),
+                or_(Homework.target_student_id.is_(None), Homework.target_student_id == sp.id),
+            )
+        ).all()
+        for hw, cls, tu in active_homework_rows:
+            homework_map[str(hw.id)] = (hw, cls, tu)
 
-    homework_rows = db.query(Homework, Class, User).join(
+    submitted_homework_rows = db.query(HomeworkSubmission, Homework, Class, User).join(
+        Homework, Homework.id == HomeworkSubmission.homework_id
+    ).join(
         Class, Class.id == Homework.class_id
     ).join(
         TeacherProfile, TeacherProfile.id == Homework.teacher_id
     ).join(
         User, User.id == TeacherProfile.user_id
     ).filter(
-        Homework.teacher_id.in_(teacher_ids)
+        HomeworkSubmission.student_id == sp.id
     ).all()
+    for _sub, hw, cls, tu in submitted_homework_rows:
+        if not _can_student_access_homework(sp.id, hw):
+            continue
+        key = str(hw.id)
+        if key not in homework_map:
+            homework_map[key] = (hw, cls, tu)
+
+    homework_rows = list(homework_map.values())
 
     submission_map = {
         str(s.homework_id): s
         for s in db.query(HomeworkSubmission).filter(HomeworkSubmission.student_id == sp.id).all()
     }
 
-    assessment_rows = db.query(Class, User).join(
-        TeacherProfile, TeacherProfile.id == Class.teacher_id
-    ).join(
-        User, User.id == TeacherProfile.user_id
-    ).filter(
-        and_(Class.teacher_id.in_(teacher_ids), Class.assessment_generated == True)
-    ).all()
+    assessment_rows = []
+    if active_teacher_ids:
+        assessment_rows = db.query(Class, User).join(
+            TeacherProfile, TeacherProfile.id == Class.teacher_id
+        ).join(
+            User, User.id == TeacherProfile.user_id
+        ).filter(
+            and_(Class.teacher_id.in_(active_teacher_ids), Class.assessment_generated == True)
+        ).all()
 
     assessed_by_class = {
         str(sa.class_id): sa
@@ -422,6 +873,7 @@ def student_feed(
     items: list[HomeworkFeedItem] = []
     for hw, cls, tu in homework_rows:
         sub = submission_map.get(str(hw.id))
+        is_submittable = _is_submittable_kind(hw.kind)
         items.append(
             HomeworkFeedItem(
                 source_type="homework",
@@ -429,6 +881,10 @@ def student_feed(
                 class_id=cls.id,
                 class_title=cls.title,
                 teacher_name=tu.full_name,
+                target_student_id=hw.target_student_id,
+                kind=hw.kind or HOMEWORK_KIND_ASSIGNMENT,
+                generated_by_diya=bool(hw.generated_by_diya),
+                is_submittable=is_submittable,
                 title=hw.title,
                 description=hw.description,
                 due_at=hw.due_at,
@@ -436,7 +892,9 @@ def student_feed(
                 file_name=hw.file_name,
                 file_size_bytes=hw.file_size_bytes,
                 submission_id=str(sub.id) if sub else None,
-                submission_status="submitted" if sub else "not_submitted",
+                submission_status=(
+                    "submitted" if sub else ("not_submitted" if is_submittable else "not_required")
+                ),
                 submitted_at=sub.submitted_at if sub else None,
                 feedback_text=sub.feedback_text if sub else None,
                 feedback_score=sub.feedback_score if sub else None,
@@ -553,7 +1011,12 @@ def download_homework_file(
         tp = _teacher_profile_for_user(current_user.id, db)
         allowed = bool(tp and tp.id == hw.teacher_id)
     elif current_user.role == "student":
-        allowed = _can_student_access_class(current_user.id, hw.class_id, db)
+        sp = _student_profile_for_user(current_user.id, db)
+        allowed = bool(
+            sp
+            and _can_student_access_class(current_user.id, hw.class_id, db)
+            and _can_student_access_homework(sp.id, hw)
+        )
 
     if not allowed:
         raise HTTPException(status_code=403, detail="You do not have access to this file.")

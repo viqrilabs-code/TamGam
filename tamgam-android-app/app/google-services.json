@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "404162620746",
+    "project_id": "tamgam-edu",
+    "storage_bucket": "tamgam-edu.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:404162620746:android:9cfbb728a94cacdd7365b3",
+        "android_client_info": {
+          "package_name": "com.tamgam.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "404162620746-qmlgh611pef5ek3rlaj99uuq9lmt5r5l.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDYqt4XLZPgnzajSMargRW2FNSf5qzv10g"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "404162620746-qmlgh611pef5ek3rlaj99uuq9lmt5r5l.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

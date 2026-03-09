@@ -1,5 +1,5 @@
 # Dockerfile
-# TamGam FastAPI application
+# tamgam FastAPI application
 # Python 3.13 slim — matches your local dev version
 
 FROM python:3.13-slim
@@ -11,9 +11,6 @@ RUN apt-get update && apt-get install -y \
     libpq-dev \
     gcc \
     curl \
-    texlive-latex-extra \
-    texlive-xetex \
-    texlive-science \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Working directory ─────────────────────────────────────────────────────────

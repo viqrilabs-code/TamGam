@@ -4,7 +4,17 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -27,7 +37,15 @@ class Homework(Base):
         nullable=False,
         index=True,
     )
+    target_student_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("student_profiles.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
 
+    kind = Column(String(32), nullable=False, default="assignment", index=True)
+    generated_by_diya = Column(Boolean, nullable=False, default=False)
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     due_at = Column(DateTime(timezone=True), nullable=True)
@@ -51,6 +69,7 @@ class Homework(Base):
 
     class_ = relationship("Class")
     teacher = relationship("TeacherProfile")
+    target_student = relationship("StudentProfile")
     submissions = relationship("HomeworkSubmission", back_populates="homework", cascade="all, delete-orphan")
 
 

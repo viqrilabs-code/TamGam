@@ -18,7 +18,6 @@ class PlanResponse(BaseModel):
     price_annual_paise: int
     price_monthly_rupees: float
     price_annual_rupees: float
-    subjects_allowed: int        # -1 = unlimited
     description: Optional[str] = None
     features: Optional[List[str]] = None
     is_active: bool
@@ -27,7 +26,7 @@ class PlanResponse(BaseModel):
 # ── Subscription ──────────────────────────────────────────────────────────────
 
 class SubscriptionStatusResponse(BaseModel):
-    """Current subscription state for the student."""
+    """Current subscription/billing state for the logged-in user."""
     is_subscribed: bool
     status: Optional[str] = None      # active | past_due | cancelled | None
     plan_name: Optional[str] = None
@@ -37,6 +36,7 @@ class SubscriptionStatusResponse(BaseModel):
     current_period_end: Optional[datetime] = None
     cancel_at_period_end: bool = False
     razorpay_subscription_id: Optional[str] = None
+    active_subscription_count: int = 0
 
 
 class CreateSubscriptionRequest(BaseModel):

@@ -1,4 +1,4 @@
-# app/schemas/teacher.py
+﻿# app/schemas/teacher.py
 # Pydantic request/response models for teacher profile endpoints
 
 from datetime import datetime
@@ -8,7 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, field_validator
 
 
-# ── Public Author Mark ────────────────────────────────────────────────────────
+# â”€â”€ Public Author Mark â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class UserMark(BaseModel):
     """Minimal user identity with marks -- used wherever author info is shown."""
@@ -20,7 +20,69 @@ class UserMark(BaseModel):
     is_verified_teacher: bool
 
 
-# ── Teacher Profile ───────────────────────────────────────────────────────────
+class TeacherEducationItem(BaseModel):
+    level: str  # 10th | 12th | bachelors | masters | other
+    institution: Optional[str] = None
+    board_or_university: Optional[str] = None
+    specialization: Optional[str] = None
+    year_of_completion: Optional[int] = None
+    marks_obtained: Optional[float] = None
+    total_marks: Optional[float] = None
+    score_percent: Optional[float] = None
+    grade: Optional[str] = None
+    achievements: List[str] = Field(default_factory=list)
+
+    @field_validator("level")
+    @classmethod
+    def valid_level(cls, v: str) -> str:
+        value = (v or "").strip().lower()
+        if value not in {"10th", "12th", "bachelors", "masters", "other"}:
+            raise ValueError("Education level must be one of: 10th, 12th, bachelors, masters, other")
+        return value
+
+    @field_validator("score_percent")
+    @classmethod
+    def valid_score_percent(cls, v: Optional[float]) -> Optional[float]:
+        if v is not None and (v < 0 or v > 100):
+            raise ValueError("score_percent must be between 0 and 100")
+        return v
+
+    @field_validator("achievements")
+    @classmethod
+    def clean_achievements(cls, v: List[str]) -> List[str]:
+        return [a.strip() for a in v if isinstance(a, str) and a.strip()]
+
+
+class TeacherPastJobExperienceItem(BaseModel):
+    organization: str
+    role_title: str
+    start_year: Optional[int] = None
+    end_year: Optional[int] = None
+    currently_working: bool = False
+    description: Optional[str] = None
+    achievements: List[str] = Field(default_factory=list)
+
+    @field_validator("organization", "role_title")
+    @classmethod
+    def required_non_empty(cls, v: str) -> str:
+        value = (v or "").strip()
+        if not value:
+            raise ValueError("This field is required")
+        return value
+
+    @field_validator("achievements")
+    @classmethod
+    def clean_job_achievements(cls, v: List[str]) -> List[str]:
+        return [a.strip() for a in v if isinstance(a, str) and a.strip()]
+
+
+class TeacherPortfolioHighlights(BaseModel):
+    most_promising_aspect: Optional[str] = None
+    marketable_achievements: List[str] = Field(default_factory=list)
+    education_achievements: List[str] = Field(default_factory=list)
+    experience_achievements: List[str] = Field(default_factory=list)
+
+# â”€â”€ Teacher Profile â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class TeacherProfilePublic(BaseModel):
     """Public-facing teacher profile -- shown to students and anonymous visitors."""
@@ -40,10 +102,14 @@ class TeacherProfilePublic(BaseModel):
     focus_boards: Optional[List[str]] = None
     class_note_tone: Optional[str] = None
     class_note_preferences: Optional[str] = None
+    education: List[TeacherEducationItem] = Field(default_factory=list)
+    past_job_experiences: List[TeacherPastJobExperienceItem] = Field(default_factory=list)
+    portfolio_highlights: TeacherPortfolioHighlights = Field(default_factory=TeacherPortfolioHighlights)
     is_verified: bool
     total_students: int
     total_classes: int
     average_rating: Optional[float] = None
+    rating_count: int = 0
     is_verified_teacher: bool  # resolved mark
 
 
@@ -76,6 +142,8 @@ class TeacherProfileUpdate(BaseModel):
     focus_boards: Optional[List[str]] = None
     class_note_tone: Optional[str] = None
     class_note_preferences: Optional[str] = None
+    education: Optional[List[TeacherEducationItem]] = None
+    past_job_experiences: Optional[List[TeacherPastJobExperienceItem]] = None
     bank_account_name: Optional[str] = None
     bank_account_number: Optional[str] = None
     bank_ifsc_code: Optional[str] = None
@@ -114,9 +182,15 @@ class TeacherBatchListItem(BaseModel):
     id: UUID
     name: str
     subject: Optional[str] = None
+    description: Optional[str] = None
     grade_level: Optional[int] = None
     class_timing: Optional[str] = None
     class_days: List[str] = Field(default_factory=list)
+    max_students: Optional[int] = None
+    member_count: int = 0
+    seats_left: Optional[int] = None
+    fee_paise: int
+    fee_rupees: float
 
 
 class TeacherListItem(BaseModel):
@@ -132,11 +206,12 @@ class TeacherListItem(BaseModel):
     is_verified: bool
     total_students: int
     average_rating: Optional[float] = None
+    rating_count: int = 0
     upcoming_class_times: Optional[List[datetime]] = None
     available_batches: Optional[List[TeacherBatchListItem]] = None
 
 
-# ── Verification ──────────────────────────────────────────────────────────────
+# â”€â”€ Verification â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class VerificationDocumentResponse(BaseModel):
     id: UUID
@@ -185,7 +260,7 @@ class VerificationStudentCandidate(BaseModel):
     grade: Optional[int] = None
 
 
-# ── Earnings ──────────────────────────────────────────────────────────────────
+# â”€â”€ Earnings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class EarningsResponse(BaseModel):
     """Teacher earnings breakdown."""
@@ -195,9 +270,28 @@ class EarningsResponse(BaseModel):
     current_commission_rate_percent: float  # 20 | 15 | 10
     total_revenue_rupees: float             # Convenience field
     net_earnings_rupees: float
+    # UI compatibility fields (legacy cards expect these keys)
+    this_month_paise: int = 0
+    last_month_paise: int = 0
+    total_paise: int = 0
+    platform_monthly_fee_paise: int = 0
 
 
-# ── Top Performers ────────────────────────────────────────────────────────────
+class TeacherPayoutItem(BaseModel):
+    id: UUID
+    period_start: datetime
+    period_end: datetime
+    net_amount_paise: int
+    net_amount_rupees: float
+    status: str
+    razorpay_payout_id: Optional[str] = None
+    razorpay_status: Optional[str] = None
+    failure_reason: Optional[str] = None
+    created_at: datetime
+    processed_at: Optional[datetime] = None
+
+
+# â”€â”€ Top Performers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class TopPerformerItem(BaseModel):
     rank: int
@@ -214,7 +308,9 @@ class TopPerformersResponse(BaseModel):
     computed_at: Optional[datetime] = None
 
 
-# ── Generic ───────────────────────────────────────────────────────────────────
+# â”€â”€ Generic â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class MessageResponse(BaseModel):
     message: str
+
+

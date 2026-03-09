@@ -1,0 +1,896 @@
+[
+  {
+    "httpRequest": {
+      "latency": "0.036331870s",
+      "protocol": "HTTP/1.1",
+      "remoteIp": "36.255.183.103",
+      "requestMethod": "GET",
+      "requestSize": "343",
+      "requestUrl": "https://tamgam-api-404162620746.asia-south1.run.app/health",
+      "responseSize": "272",
+      "serverIp": "34.143.73.2",
+      "status": 200,
+      "userAgent": "Mozilla/5.0 (Windows NT; Windows NT 10.0; en-IN) WindowsPowerShell/5.1.26100.7705"
+    },
+    "insertId": "699de7e1000e0dad6685f11c",
+    "labels": {
+      "instanceId": "00da6cd2c40f1c5974746674f7bf9fdca5a89f6a154ba223d32edf1bb292bf1e32c3fc49a5ed74bf34ee2c944c5736e4a5365e0055d6d6349d24f6cc150530eadb5c2418e9aece9f2dd9600b2b6791"
+    },
+    "logName": "projects/tamgam-edu/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2026-02-24T18:03:13.924861013Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "tamgam-api",
+        "location": "asia-south1",
+        "project_id": "tamgam-edu",
+        "revision_name": "tamgam-api-00013-dvz",
+        "service_name": "tamgam-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "spanId": "c46c06ccfe342c89",
+    "timestamp": "2026-02-24T18:03:13.877642Z",
+    "trace": "projects/tamgam-edu/traces/96ebac393ad9befbfa3d1de5ef04e079",
+    "traceSampled": true
+  },
+  {
+    "insertId": "vyb4fgd2apy",
+    "logName": "projects/tamgam-edu/logs/cloudaudit.googleapis.com%2Fsystem_event",
+    "protoPayload": {
+      "@type": "type.googleapis.com/google.cloud.audit.AuditLog",
+      "methodName": "/Services.ReplaceService",
+      "resourceName": "namespaces/tamgam-edu/revisions/tamgam-api-00013-dvz",
+      "response": {
+        "@type": "type.googleapis.com/google.cloud.run.v1.Revision",
+        "apiVersion": "serving.knative.dev/v1",
+        "kind": "Revision",
+        "metadata": {
+          "annotations": {
+            "autoscaling.knative.dev/maxScale": "4",
+            "run.googleapis.com/client-name": "gcloud",
+            "run.googleapis.com/client-version": "541.0.0",
+            "run.googleapis.com/cloudsql-instances": "tamgam-edu:asia-south1:tamgam-pg",
+            "run.googleapis.com/cpu-throttling": "true",
+            "run.googleapis.com/operation-id": "b56e8d91-001b-42bc-bc77-f3bdeb8ecaf2",
+            "run.googleapis.com/startup-cpu-boost": "true",
+            "serving.knative.dev/creator": "amitinger26@gmail.com"
+          },
+          "creationTimestamp": "2026-02-24T18:02:32.383735Z",
+          "generation": 1,
+          "labels": {
+            "client.knative.dev/nonce": "agkudjvfve",
+            "cloud.googleapis.com/location": "asia-south1",
+            "run.googleapis.com/satisfiesPzs": "true",
+            "run.googleapis.com/startupProbeType": "Default",
+            "serving.knative.dev/configuration": "tamgam-api",
+            "serving.knative.dev/configurationGeneration": "13",
+            "serving.knative.dev/route": "tamgam-api",
+            "serving.knative.dev/service": "tamgam-api",
+            "serving.knative.dev/serviceUid": "ef2143ff-8da1-4942-8eb8-67dd8b22d31d"
+          },
+          "name": "tamgam-api-00013-dvz",
+          "namespace": "404162620746",
+          "ownerReferences": [
+            {
+              "apiVersion": "serving.knative.dev/v1",
+              "blockOwnerDeletion": true,
+              "controller": true,
+              "kind": "Configuration",
+              "name": "tamgam-api",
+              "uid": "c581af98-7b8a-4418-b052-96dde2528821"
+            }
+          ],
+          "resourceVersion": "AAZLlbHodFU",
+          "selfLink": "/apis/serving.knative.dev/v1/namespaces/404162620746/revisions/tamgam-api-00013-dvz",
+          "uid": "e4afad75-400d-464a-9612-69a1b8987ac0"
+        },
+        "spec": {
+          "containerConcurrency": 40,
+          "containers": [
+            {
+              "env": [
+                {
+                  "name": "APP_ENV",
+                  "value": "production"
+                },
+                {
+                  "name": "DB_USER",
+                  "value": "tamgam"
+                },
+                {
+                  "name": "DB_NAME",
+                  "value": "tamgam"
+                },
+                {
+                  "name": "DB_CONNECTION_NAME",
+                  "value": "tamgam-edu:asia-south1:tamgam-pg"
+                },
+                {
+                  "name": "AUTO_MIGRATE_ON_STARTUP",
+                  "value": "true"
+                },
+                {
+                  "name": "DB_PASS",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "latest",
+                      "name": "env-db-pass"
+                    }
+                  }
+                },
+                {
+                  "name": "JWT_SECRET_KEY",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "latest",
+                      "name": "env-jwt-secret-key"
+                    }
+                  }
+                },
+                {
+                  "name": "GEMINI_API_KEY_1",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "latest",
+                      "name": "env-gemini-api-key-1"
+                    }
+                  }
+                },
+                {
+                  "name": "GEMINI_API_KEY_2",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "latest",
+                      "name": "env-gemini-api-key-2"
+                    }
+                  }
+                },
+                {
+                  "name": "GEMINI_API_KEY_3",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "latest",
+                      "name": "env-gemini-api-key-3"
+                    }
+                  }
+                },
+                {
+                  "name": "GEMINI_API_KEY_4",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "latest",
+                      "name": "env-gemini-api-key-4"
+                    }
+                  }
+                },
+                {
+                  "name": "GEMINI_API_KEY_5",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "latest",
+                      "name": "env-gemini-api-key-5"
+                    }
+                  }
+                },
+                {
+                  "name": "RAZORPAY_KEY_ID",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "latest",
+                      "name": "env-razorpay-key-id"
+                    }
+                  }
+                },
+                {
+                  "name": "RAZORPAY_KEY_SECRET",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "latest",
+                      "name": "env-razorpay-key-secret"
+                    }
+                  }
+                },
+                {
+                  "name": "RAZORPAY_WEBHOOK_SECRET",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "latest",
+                      "name": "env-razorpay-webhook-secret"
+                    }
+                  }
+                }
+              ],
+              "image": "asia-south1-docker.pkg.dev/tamgam-edu/tamgam/tamgam-api@sha256:7e3faee387af6c12f33a1c53b63422b0f56c8c3361fcf491821323783f934653",
+              "name": "tamgam-api-1",
+              "ports": [
+                {
+                  "containerPort": 8000,
+                  "name": "http1"
+                }
+              ],
+              "resources": {
+                "limits": {
+                  "cpu": "1",
+                  "memory": "512Mi"
+                }
+              },
+              "startupProbe": {
+                "failureThreshold": 1,
+                "periodSeconds": 240,
+                "tcpSocket": {
+                  "port": 8000
+                },
+                "timeoutSeconds": 240
+              }
+            }
+          ],
+          "serviceAccountName": "404162620746-compute@developer.gserviceaccount.com",
+          "timeoutSeconds": 120
+        },
+        "status": {
+          "conditions": [
+            {
+              "lastTransitionTime": "2026-02-24T18:02:47.275605Z",
+              "message": "Deploying revision succeeded in 14.89s.",
+              "status": "True",
+              "type": "Ready"
+            },
+            {
+              "lastTransitionTime": "2026-02-24T18:02:47.226102Z",
+              "message": "Containers became healthy in 10.53s.",
+              "status": "True",
+              "type": "ContainerHealthy"
+            },
+            {
+              "lastTransitionTime": "2026-02-24T18:02:33.017926Z",
+              "message": "Container image import completed.",
+              "status": "True",
+              "type": "ContainerReady"
+            },
+            {
+              "lastTransitionTime": "2026-02-24T18:02:36.096700Z",
+              "message": "Provisioning imported containers completed in 3.08s. Checking container health. This will wait for up to 4m for the configured startup probe, including an initial delay of 0s.",
+              "status": "True",
+              "type": "ResourcesAvailable"
+            }
+          ],
+          "containerStatuses": [
+            {
+              "imageDigest": "asia-south1-docker.pkg.dev/tamgam-edu/tamgam/tamgam-api@sha256:7e3faee387af6c12f33a1c53b63422b0f56c8c3361fcf491821323783f934653",
+              "name": "tamgam-api-1"
+            }
+          ],
+          "imageDigest": "asia-south1-docker.pkg.dev/tamgam-edu/tamgam/tamgam-api@sha256:7e3faee387af6c12f33a1c53b63422b0f56c8c3361fcf491821323783f934653",
+          "logUrl": "https://console.cloud.google.com/logs/viewer?project=tamgam-edu&resource=cloud_run_revision/service_name/tamgam-api/revision_name/tamgam-api-00013-dvz&advancedFilter=resource.type%3D%22cloud_run_revision%22%0Aresource.labels.service_name%3D%22tamgam-api%22%0Aresource.labels.revision_name%3D%22tamgam-api-00013-dvz%22",
+          "observedGeneration": 1
+        }
+      },
+      "serviceName": "run.googleapis.com",
+      "status": {
+        "message": "Ready condition status changed to True for Revision tamgam-api-00013-dvz with message: Deploying revision succeeded in 14.89s."
+      }
+    },
+    "receiveTimestamp": "2026-02-24T18:02:47.906058186Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "tamgam-api",
+        "location": "asia-south1",
+        "project_id": "tamgam-edu",
+        "revision_name": "tamgam-api-00013-dvz",
+        "service_name": "tamgam-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "timestamp": "2026-02-24T18:02:47.284257Z"
+  },
+  {
+    "insertId": "699de7c70003553d02240635",
+    "labels": {
+      "instanceId": "00da6cd2c40f1c5974746674f7bf9fdca5a89f6a154ba223d32edf1bb292bf1e32c3fc49a5ed74bf34ee2c944c5736e4a5365e0055d6d6349d24f6cc150530eadb5c2418e9aece9f2dd9600b2b6791"
+    },
+    "logName": "projects/tamgam-edu/logs/run.googleapis.com%2Fvarlog%2Fsystem",
+    "receiveTimestamp": "2026-02-24T18:02:47.232959998Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "tamgam-api",
+        "location": "asia-south1",
+        "project_id": "tamgam-edu",
+        "revision_name": "tamgam-api-00013-dvz",
+        "service_name": "tamgam-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "textPayload": "Default STARTUP TCP probe succeeded after 1 attempt for container \"tamgam-api-1\" on port 8000.",
+    "timestamp": "2026-02-24T18:02:47.218429Z"
+  },
+  {
+    "insertId": "699de7c700018201cf2f97b9",
+    "labels": {
+      "instanceId": "00da6cd2c40f1c5974746674f7bf9fdca5a89f6a154ba223d32edf1bb292bf1e32c3fc49a5ed74bf34ee2c944c5736e4a5365e0055d6d6349d24f6cc150530eadb5c2418e9aece9f2dd9600b2b6791"
+    },
+    "logName": "projects/tamgam-edu/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-02-24T18:02:47.190263686Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "tamgam-api",
+        "location": "asia-south1",
+        "project_id": "tamgam-edu",
+        "revision_name": "tamgam-api-00013-dvz",
+        "service_name": "tamgam-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "INFO  [alembic.runtime.migration] Running upgrade 20260222_0009 -> 20260222_0010, batch visibility controls and tuition request batch selection",
+    "timestamp": "2026-02-24T18:02:47.098817Z"
+  },
+  {
+    "insertId": "699de7c700016599fb80c5bb",
+    "labels": {
+      "instanceId": "00da6cd2c40f1c5974746674f7bf9fdca5a89f6a154ba223d32edf1bb292bf1e32c3fc49a5ed74bf34ee2c944c5736e4a5365e0055d6d6349d24f6cc150530eadb5c2418e9aece9f2dd9600b2b6791"
+    },
+    "logName": "projects/tamgam-edu/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-02-24T18:02:47.190263686Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "tamgam-api",
+        "location": "asia-south1",
+        "project_id": "tamgam-edu",
+        "revision_name": "tamgam-api-00013-dvz",
+        "service_name": "tamgam-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "INFO  [alembic.runtime.migration] Running upgrade 20260222_0008 -> 20260222_0009, add default timing to batches",
+    "timestamp": "2026-02-24T18:02:47.091545Z"
+  },
+  {
+    "insertId": "699de7c700014a988ca96507",
+    "labels": {
+      "instanceId": "00da6cd2c40f1c5974746674f7bf9fdca5a89f6a154ba223d32edf1bb292bf1e32c3fc49a5ed74bf34ee2c944c5736e4a5365e0055d6d6349d24f6cc150530eadb5c2418e9aece9f2dd9600b2b6791"
+    },
+    "logName": "projects/tamgam-edu/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-02-24T18:02:47.190263686Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "tamgam-api",
+        "location": "asia-south1",
+        "project_id": "tamgam-edu",
+        "revision_name": "tamgam-api-00013-dvz",
+        "service_name": "tamgam-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "INFO  [alembic.runtime.migration] Running upgrade 20260221_0007 -> 20260222_0008, add grade_level to batches",
+    "timestamp": "2026-02-24T18:02:47.084632Z"
+  },
+  {
+    "insertId": "699de7c7000117c2c9a32de9",
+    "labels": {
+      "instanceId": "00da6cd2c40f1c5974746674f7bf9fdca5a89f6a154ba223d32edf1bb292bf1e32c3fc49a5ed74bf34ee2c944c5736e4a5365e0055d6d6349d24f6cc150530eadb5c2418e9aece9f2dd9600b2b6791"
+    },
+    "logName": "projects/tamgam-edu/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-02-24T18:02:47.190263686Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "tamgam-api",
+        "location": "asia-south1",
+        "project_id": "tamgam-edu",
+        "revision_name": "tamgam-api-00013-dvz",
+        "service_name": "tamgam-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "INFO  [alembic.runtime.migration] Running upgrade 20260221_0006 -> 20260221_0007, add subscription cancel flag and past_due enum value",
+    "timestamp": "2026-02-24T18:02:47.071618Z"
+  },
+  {
+    "insertId": "699de7c70000ffd77fc2ef75",
+    "labels": {
+      "instanceId": "00da6cd2c40f1c5974746674f7bf9fdca5a89f6a154ba223d32edf1bb292bf1e32c3fc49a5ed74bf34ee2c944c5736e4a5365e0055d6d6349d24f6cc150530eadb5c2418e9aece9f2dd9600b2b6791"
+    },
+    "logName": "projects/tamgam-edu/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-02-24T18:02:47.190263686Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "tamgam-api",
+        "location": "asia-south1",
+        "project_id": "tamgam-edu",
+        "revision_name": "tamgam-api-00013-dvz",
+        "service_name": "tamgam-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "INFO  [alembic.runtime.migration] Running upgrade 20260221_0005 -> 20260221_0006, add pending_unenroll_at to enrollments",
+    "timestamp": "2026-02-24T18:02:47.065495Z"
+  },
+  {
+    "insertId": "699de7c7000039a81667a8a7",
+    "labels": {
+      "instanceId": "00da6cd2c40f1c5974746674f7bf9fdca5a89f6a154ba223d32edf1bb292bf1e32c3fc49a5ed74bf34ee2c944c5736e4a5365e0055d6d6349d24f6cc150530eadb5c2418e9aece9f2dd9600b2b6791"
+    },
+    "logName": "projects/tamgam-edu/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-02-24T18:02:47.190263686Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "tamgam-api",
+        "location": "asia-south1",
+        "project_id": "tamgam-edu",
+        "revision_name": "tamgam-api-00013-dvz",
+        "service_name": "tamgam-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "INFO  [alembic.runtime.migration] Running upgrade 20260221_0004 -> 20260221_0005, add student_note_requests table",
+    "timestamp": "2026-02-24T18:02:47.014760Z"
+  },
+  {
+    "insertId": "699de7c6000ef0e379b7d2ea",
+    "labels": {
+      "instanceId": "00da6cd2c40f1c5974746674f7bf9fdca5a89f6a154ba223d32edf1bb292bf1e32c3fc49a5ed74bf34ee2c944c5736e4a5365e0055d6d6349d24f6cc150530eadb5c2418e9aece9f2dd9600b2b6791"
+    },
+    "logName": "projects/tamgam-edu/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-02-24T18:02:47.190263686Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "tamgam-api",
+        "location": "asia-south1",
+        "project_id": "tamgam-edu",
+        "revision_name": "tamgam-api-00013-dvz",
+        "service_name": "tamgam-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "INFO  [alembic.runtime.migration] Running upgrade 20260221_0003 -> 20260221_0004, add homework_submissions table",
+    "timestamp": "2026-02-24T18:02:46.979171Z"
+  },
+  {
+    "insertId": "699de7c6000e43c2a7ede409",
+    "labels": {
+      "instanceId": "00da6cd2c40f1c5974746674f7bf9fdca5a89f6a154ba223d32edf1bb292bf1e32c3fc49a5ed74bf34ee2c944c5736e4a5365e0055d6d6349d24f6cc150530eadb5c2418e9aece9f2dd9600b2b6791"
+    },
+    "logName": "projects/tamgam-edu/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-02-24T18:02:47.190263686Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "tamgam-api",
+        "location": "asia-south1",
+        "project_id": "tamgam-edu",
+        "revision_name": "tamgam-api-00013-dvz",
+        "service_name": "tamgam-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "INFO  [alembic.runtime.migration] Running upgrade 20260220_0002 -> 20260221_0003, add homeworks table",
+    "timestamp": "2026-02-24T18:02:46.934850Z"
+  },
+  {
+    "insertId": "699de7c6000d534e008a5f52",
+    "labels": {
+      "instanceId": "00da6cd2c40f1c5974746674f7bf9fdca5a89f6a154ba223d32edf1bb292bf1e32c3fc49a5ed74bf34ee2c944c5736e4a5365e0055d6d6349d24f6cc150530eadb5c2418e9aece9f2dd9600b2b6791"
+    },
+    "logName": "projects/tamgam-edu/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-02-24T18:02:47.190263686Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "tamgam-api",
+        "location": "asia-south1",
+        "project_id": "tamgam-edu",
+        "revision_name": "tamgam-api-00013-dvz",
+        "service_name": "tamgam-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "INFO  [alembic.runtime.migration] Running upgrade 20260218_0001 -> 20260220_0002, add student and teacher personalization profile fields",
+    "timestamp": "2026-02-24T18:02:46.873294Z"
+  },
+  {
+    "insertId": "699de7c6000c63f19834cfe2",
+    "labels": {
+      "instanceId": "00da6cd2c40f1c5974746674f7bf9fdca5a89f6a154ba223d32edf1bb292bf1e32c3fc49a5ed74bf34ee2c944c5736e4a5365e0055d6d6349d24f6cc150530eadb5c2418e9aece9f2dd9600b2b6791"
+    },
+    "logName": "projects/tamgam-edu/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-02-24T18:02:46.858580049Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "tamgam-api",
+        "location": "asia-south1",
+        "project_id": "tamgam-edu",
+        "revision_name": "tamgam-api-00013-dvz",
+        "service_name": "tamgam-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "INFO  [alembic.runtime.migration] Running upgrade ae3c52967305 -> 20260218_0001, add books table and book_chunk embedding type",
+    "timestamp": "2026-02-24T18:02:46.812017Z"
+  },
+  {
+    "insertId": "699de7c5000e332193e2c29e",
+    "labels": {
+      "instanceId": "00da6cd2c40f1c5974746674f7bf9fdca5a89f6a154ba223d32edf1bb292bf1e32c3fc49a5ed74bf34ee2c944c5736e4a5365e0055d6d6349d24f6cc150530eadb5c2418e9aece9f2dd9600b2b6791"
+    },
+    "logName": "projects/tamgam-edu/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-02-24T18:02:46.191772423Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "tamgam-api",
+        "location": "asia-south1",
+        "project_id": "tamgam-edu",
+        "revision_name": "tamgam-api-00013-dvz",
+        "service_name": "tamgam-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "INFO  [alembic.runtime.migration] Running upgrade  -> ae3c52967305, initial_schema",
+    "timestamp": "2026-02-24T18:02:45.930593Z"
+  },
+  {
+    "insertId": "699de7c5000c4a545b0a3662",
+    "labels": {
+      "instanceId": "00da6cd2c40f1c5974746674f7bf9fdca5a89f6a154ba223d32edf1bb292bf1e32c3fc49a5ed74bf34ee2c944c5736e4a5365e0055d6d6349d24f6cc150530eadb5c2418e9aece9f2dd9600b2b6791"
+    },
+    "logName": "projects/tamgam-edu/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-02-24T18:02:45.859422044Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "tamgam-api",
+        "location": "asia-south1",
+        "project_id": "tamgam-edu",
+        "revision_name": "tamgam-api-00013-dvz",
+        "service_name": "tamgam-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "INFO  [alembic.runtime.migration] Will assume transactional DDL.",
+    "timestamp": "2026-02-24T18:02:45.805460Z"
+  },
+  {
+    "insertId": "699de7c5000c49e476118f2c",
+    "labels": {
+      "instanceId": "00da6cd2c40f1c5974746674f7bf9fdca5a89f6a154ba223d32edf1bb292bf1e32c3fc49a5ed74bf34ee2c944c5736e4a5365e0055d6d6349d24f6cc150530eadb5c2418e9aece9f2dd9600b2b6791"
+    },
+    "logName": "projects/tamgam-edu/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-02-24T18:02:45.859422044Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "tamgam-api",
+        "location": "asia-south1",
+        "project_id": "tamgam-edu",
+        "revision_name": "tamgam-api-00013-dvz",
+        "service_name": "tamgam-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.",
+    "timestamp": "2026-02-24T18:02:45.805348Z"
+  },
+  {
+    "insertId": "699de7c50007fa200e55892d",
+    "labels": {
+      "instanceId": "00da6cd2c40f1c5974746674f7bf9fdca5a89f6a154ba223d32edf1bb292bf1e32c3fc49a5ed74bf34ee2c944c5736e4a5365e0055d6d6349d24f6cc150530eadb5c2418e9aece9f2dd9600b2b6791"
+    },
+    "logName": "projects/tamgam-edu/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-02-24T18:02:45.525951774Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "tamgam-api",
+        "location": "asia-south1",
+        "project_id": "tamgam-edu",
+        "revision_name": "tamgam-api-00013-dvz",
+        "service_name": "tamgam-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "2026-02-24 18:02:45 | INFO     | tamgam.main | Starting tamgam v1.0.0 [production]",
+    "timestamp": "2026-02-24T18:02:45.522784Z"
+  },
+  {
+    "insertId": "699de7c50007f68977223be6",
+    "labels": {
+      "instanceId": "00da6cd2c40f1c5974746674f7bf9fdca5a89f6a154ba223d32edf1bb292bf1e32c3fc49a5ed74bf34ee2c944c5736e4a5365e0055d6d6349d24f6cc150530eadb5c2418e9aece9f2dd9600b2b6791"
+    },
+    "logName": "projects/tamgam-edu/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-02-24T18:02:45.525554145Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "tamgam-api",
+        "location": "asia-south1",
+        "project_id": "tamgam-edu",
+        "revision_name": "tamgam-api-00013-dvz",
+        "service_name": "tamgam-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "INFO:     Waiting for application startup.",
+    "timestamp": "2026-02-24T18:02:45.521865Z"
+  },
+  {
+    "insertId": "699de7c50007f669b2a9609c",
+    "labels": {
+      "instanceId": "00da6cd2c40f1c5974746674f7bf9fdca5a89f6a154ba223d32edf1bb292bf1e32c3fc49a5ed74bf34ee2c944c5736e4a5365e0055d6d6349d24f6cc150530eadb5c2418e9aece9f2dd9600b2b6791"
+    },
+    "logName": "projects/tamgam-edu/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2026-02-24T18:02:45.525554145Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "tamgam-api",
+        "location": "asia-south1",
+        "project_id": "tamgam-edu",
+        "revision_name": "tamgam-api-00013-dvz",
+        "service_name": "tamgam-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "INFO:     Started server process [2]",
+    "timestamp": "2026-02-24T18:02:45.521833Z"
+  },
+  {
+    "insertId": "699de7bc00039fba435936c0",
+    "labels": {
+      "instanceId": "00da6cd2c40f1c5974746674f7bf9fdca5a89f6a154ba223d32edf1bb292bf1e32c3fc49a5ed74bf34ee2c944c5736e4a5365e0055d6d6349d24f6cc150530eadb5c2418e9aece9f2dd9600b2b6791",
+      "scaling_reason": "DEPLOYMENT_ROLLOUT"
+    },
+    "logName": "projects/tamgam-edu/logs/run.googleapis.com%2Fvarlog%2Fsystem",
+    "receiveTimestamp": "2026-02-24T18:02:36.240997575Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "tamgam-api",
+        "location": "asia-south1",
+        "project_id": "tamgam-edu",
+        "revision_name": "tamgam-api-00013-dvz",
+        "service_name": "tamgam-api"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "textPayload": "Starting new instance. Reason: DEPLOYMENT_ROLLOUT - Instance started due to traffic shifting between revisions due to deployment, traffic split adjustment, or deployment health check.",
+    "timestamp": "2026-02-24T18:02:36.237498Z"
+  },
+  {
+    "insertId": "-psh3hhd5u5a",
+    "logName": "projects/tamgam-edu/logs/cloudaudit.googleapis.com%2Fsystem_event",
+    "protoPayload": {
+      "@type": "type.googleapis.com/google.cloud.audit.AuditLog",
+      "methodName": "/Services.ReplaceService",
+      "resourceName": "namespaces/tamgam-edu/revisions/tamgam-api-00013-dvz",
+      "response": {
+        "@type": "type.googleapis.com/google.cloud.run.v1.Revision",
+        "apiVersion": "serving.knative.dev/v1",
+        "kind": "Revision",
+        "metadata": {
+          "annotations": {
+            "autoscaling.knative.dev/maxScale": "4",
+            "run.googleapis.com/client-name": "gcloud",
+            "run.googleapis.com/client-version": "541.0.0",
+            "run.googleapis.com/cloudsql-instances": "tamgam-edu:asia-south1:tamgam-pg",
+            "run.googleapis.com/cpu-throttling": "true",
+            "run.googleapis.com/operation-id": "b56e8d91-001b-42bc-bc77-f3bdeb8ecaf2",
+            "run.googleapis.com/startup-cpu-boost": "true",
+            "serving.knative.dev/creator": "amitinger26@gmail.com"
+          },
+          "creationTimestamp": "2026-02-24T18:02:32.383735Z",
+          "generation": 1,
+          "labels": {
+            "client.knative.dev/nonce": "agkudjvfve",
+            "cloud.googleapis.com/location": "asia-south1",
+            "run.googleapis.com/satisfiesPzs": "true",
+            "run.googleapis.com/startupProbeType": "Default",
+            "serving.knative.dev/configuration": "tamgam-api",
+            "serving.knative.dev/configurationGeneration": "13",
+            "serving.knative.dev/service": "tamgam-api",
+            "serving.knative.dev/serviceUid": "ef2143ff-8da1-4942-8eb8-67dd8b22d31d"
+          },
+          "name": "tamgam-api-00013-dvz",
+          "namespace": "404162620746",
+          "ownerReferences": [
+            {
+              "apiVersion": "serving.knative.dev/v1",
+              "blockOwnerDeletion": true,
+              "controller": true,
+              "kind": "Configuration",
+              "name": "tamgam-api",
+              "uid": "c581af98-7b8a-4418-b052-96dde2528821"
+            }
+          ],
+          "resourceVersion": "AAZLlbEPmrI",
+          "selfLink": "/apis/serving.knative.dev/v1/namespaces/404162620746/revisions/tamgam-api-00013-dvz",
+          "uid": "e4afad75-400d-464a-9612-69a1b8987ac0"
+        },
+        "spec": {
+          "containerConcurrency": 40,
+          "containers": [
+            {
+              "env": [
+                {
+                  "name": "APP_ENV",
+                  "value": "production"
+                },
+                {
+                  "name": "DB_USER",
+                  "value": "tamgam"
+                },
+                {
+                  "name": "DB_NAME",
+                  "value": "tamgam"
+                },
+                {
+                  "name": "DB_CONNECTION_NAME",
+                  "value": "tamgam-edu:asia-south1:tamgam-pg"
+                },
+                {
+                  "name": "AUTO_MIGRATE_ON_STARTUP",
+                  "value": "true"
+                },
+                {
+                  "name": "DB_PASS",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "latest",
+                      "name": "env-db-pass"
+                    }
+                  }
+                },
+                {
+                  "name": "JWT_SECRET_KEY",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "latest",
+                      "name": "env-jwt-secret-key"
+                    }
+                  }
+                },
+                {
+                  "name": "GEMINI_API_KEY_1",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "latest",
+                      "name": "env-gemini-api-key-1"
+                    }
+                  }
+                },
+                {
+                  "name": "GEMINI_API_KEY_2",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "latest",
+                      "name": "env-gemini-api-key-2"
+                    }
+                  }
+                },
+                {
+                  "name": "GEMINI_API_KEY_3",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "latest",
+                      "name": "env-gemini-api-key-3"
+                    }
+                  }
+                },
+                {
+                  "name": "GEMINI_API_KEY_4",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "latest",
+                      "name": "env-gemini-api-key-4"
+                    }
+                  }
+                },
+                {
+                  "name": "GEMINI_API_KEY_5",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "latest",
+                      "name": "env-gemini-api-key-5"
+                    }
+                  }
+                },
+                {
+                  "name": "RAZORPAY_KEY_ID",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "latest",
+                      "name": "env-razorpay-key-id"
+                    }
+                  }
+                },
+                {
+                  "name": "RAZORPAY_KEY_SECRET",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "latest",
+                      "name": "env-razorpay-key-secret"
+                    }
+                  }
+                },
+                {
+                  "name": "RAZORPAY_WEBHOOK_SECRET",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "latest",
+                      "name": "env-razorpay-webhook-secret"
+                    }
+                  }
+                }
+              ],
+              "image": "asia-south1-docker.pkg.dev/tamgam-edu/tamgam/tamgam-api@sha256:7e3faee387af6c12f33a1c53b63422b0f56c8c3361fcf491821323783f934653",
+              "name": "tamgam-api-1",
+              "ports": [
+                {
+                  "containerPort": 8000,
+                  "name": "http1"
+                }
+              ],
+              "resources": {
+                "limits": {
+                  "cpu": "1",
+                  "memory": "512Mi"
+                }
+              },
+              "startupProbe": {
+                "failureThreshold": 1,
+                "periodSeconds": 240,
+                "tcpSocket": {
+                  "port": 8000
+                },
+                "timeoutSeconds": 240
+              }
+            }
+          ],
+          "serviceAccountName": "404162620746-compute@developer.gserviceaccount.com",
+          "timeoutSeconds": 120
+        },
+        "status": {
+          "conditions": [
+            {
+              "lastTransitionTime": "2026-02-24T18:02:33.064114Z",
+              "status": "True",
+              "type": "Ready"
+            },
+            {
+              "lastTransitionTime": "2026-02-24T18:02:33.017926Z",
+              "message": "Container image import completed.",
+              "status": "True",
+              "type": "ContainerReady"
+            },
+            {
+              "lastTransitionTime": "2026-02-24T18:02:33.064114Z",
+              "message": "System will retry after 00:05 from lastTransitionTime for attempt 0.",
+              "reason": "WatchWaiting",
+              "severity": "Info",
+              "status": "True",
+              "type": "Retry"
+            }
+          ],
+          "containerStatuses": [
+            {
+              "imageDigest": "asia-south1-docker.pkg.dev/tamgam-edu/tamgam/tamgam-api@sha256:7e3faee387af6c12f33a1c53b63422b0f56c8c3361fcf491821323783f934653",
+              "name": "tamgam-api-1"
+            }
+          ],
+          "imageDigest": "asia-south1-docker.pkg.dev/tamgam-edu/tamgam/tamgam-api@sha256:7e3faee387af6c12f33a1c53b63422b0f56c8c3361fcf491821323783f934653",
+          "logUrl": "https://console.cloud.google.com/logs/viewer?project=tamgam-edu&resource=cloud_run_revision/service_name/tamgam-api/revision_name/tamgam-api-00013-dvz&advancedFilter=resource.type%3D%22cloud_run_revision%22%0Aresource.labels.service_name%3D%22tamgam-api%22%0Aresource.labels.revision_name%3D%22tamgam-api-00013-dvz%22",
+          "observedGeneration": 1
+        }
+      },
+      "serviceName": "run.googleapis.com",
+      "status": {
+        "message": "Ready condition status changed to True for Revision tamgam-api-00013-dvz."
+      }
+    },
+    "receiveTimestamp": "2026-02-24T18:02:34.090799713Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "tamgam-api",
+        "location": "asia-south1",
+        "project_id": "tamgam-edu",
+        "revision_name": "tamgam-api-00013-dvz",
+        "service_name": ""
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "timestamp": "2026-02-24T18:02:33.071943Z"
+  }
+]

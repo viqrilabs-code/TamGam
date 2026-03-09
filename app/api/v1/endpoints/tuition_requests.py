@@ -2,17 +2,17 @@
 # Tuition request endpoints
 #
 # Student flow:
-#   POST   /tuition-requests/           → raise request to a teacher
-#   GET    /tuition-requests/me         → see own sent requests
-#   DELETE /tuition-requests/{id}       → cancel a pending request
+#   POST   /tuition-requests/           â†’ raise request to a teacher
+#   GET    /tuition-requests/me         â†’ see own sent requests
+#   DELETE /tuition-requests/{id}       â†’ cancel a pending request
 #
 # Teacher flow:
-#   GET    /tuition-requests/incoming   → see pending requests from students
-#   PATCH  /tuition-requests/{id}/accept  → accept → auto-creates enrollment
-#   PATCH  /tuition-requests/{id}/decline → decline with optional reason
+#   GET    /tuition-requests/incoming   â†’ see pending requests from students
+#   PATCH  /tuition-requests/{id}/accept  â†’ accept â†’ auto-creates enrollment
+#   PATCH  /tuition-requests/{id}/decline â†’ decline with optional reason
 #
 # Teacher searches for students:
-#   GET    /tuition-requests/students/search → filter by grade/subject/city
+#   GET    /tuition-requests/students/search â†’ filter by grade/subject/city
 
 from datetime import datetime, timezone
 from typing import List, Optional
@@ -23,15 +23,22 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 import app.db.base  # noqa: F401
-from app.core.dependencies import get_effective_active_subscription, require_login
+from app.core.config import settings
+from app.core.dependencies import (
+    ensure_teacher_billing_active,
+    get_effective_active_subscription,
+    require_login,
+)
 from app.db.session import get_db
 from app.models.student import Batch, BatchMember, Enrollment, StudentProfile
 from app.models.notification import Notification
-from app.models.subscription import Plan
 from app.models.teacher import TeacherProfile
 from app.models.tuition_request import TuitionRequest
 from app.models.user import User
 from app.schemas.tuition_request import (
+    BatchCheckoutResponse,
+    BatchPaymentInitRequest,
+    BatchPaymentInitResponse,
     MessageResponse,
     StudentSearchItem,
     TeacherStudentItem,
@@ -40,24 +47,27 @@ from app.schemas.tuition_request import (
     TuitionRequestListItem,
     TuitionRequestResponse,
 )
+from app.services import razorpay_service
 
 router = APIRouter()
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _is_subscribed(user_id: UUID, db: Session) -> bool:
+    user = db.query(User).filter(User.id == user_id).first()
+    if user and user.role == "student":
+        return True
     return get_effective_active_subscription(user_id, db) is not None
 
 
-def _get_active_subscription_with_plan(user_id: UUID, db: Session):
-    active_sub = get_effective_active_subscription(user_id, db)
-    if not active_sub:
-        return None
-    plan = db.query(Plan).filter(Plan.id == active_sub.plan_id).first()
-    if not plan:
-        return None
-    return active_sub, plan
+def _teacher_commission_rate(total_revenue_paise: int) -> float:
+    total_rupees = (total_revenue_paise or 0) / 100
+    if total_rupees <= 50000:
+        return 20.0
+    if total_rupees <= 200000:
+        return 15.0
+    return 10.0
 
 
 def _sync_due_unenrollments(db: Session, *, student_profile_id: UUID | None = None, teacher_id: UUID | None = None) -> None:
@@ -84,57 +94,6 @@ def _sync_due_unenrollments(db: Session, *, student_profile_id: UUID | None = No
     db.flush()
 
 
-def _plan_enrollment_limit(plan_slug: str) -> int:
-    limits = {
-        "basic": 1,
-        "standard": 2,
-        "pro": 3,
-    }
-    return limits.get((plan_slug or "").lower(), 1)
-
-
-def _enforce_plan_enrollment_cap(
-    student_profile_id: UUID,
-    plan_slug: str,
-    db: Session,
-    include_pending_requests: bool = False,
-):
-    limit = _plan_enrollment_limit(plan_slug)
-    active_enrollments_count = db.query(Enrollment).filter(
-        and_(
-            Enrollment.student_id == student_profile_id,
-            Enrollment.is_active == True,
-        )
-    ).count()
-    used_slots = active_enrollments_count
-    pending_requests_count = 0
-    if include_pending_requests:
-        pending_requests_count = db.query(TuitionRequest).filter(
-            and_(
-                TuitionRequest.student_id == student_profile_id,
-                TuitionRequest.status == "pending",
-            )
-        ).count()
-        used_slots += pending_requests_count
-
-    if used_slots >= limit:
-        plan_name = (plan_slug or "current").strip().title()
-        slot_label = "active enrollment(s)"
-        if include_pending_requests:
-            slot_label = "active enrollment(s) + pending request(s)"
-        hint = (
-            " Withdraw an existing pending request to request another teacher."
-            if include_pending_requests and pending_requests_count > 0
-            else ""
-        )
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"{plan_name} plan limit reached: maximum {limit} {slot_label} allowed.{hint}"
-            ),
-        )
-
-
 def _get_student_profile(user_id: UUID, db: Session) -> StudentProfile:
     profile = db.query(StudentProfile).filter(
         StudentProfile.user_id == user_id
@@ -151,6 +110,48 @@ def _get_teacher_profile(user_id: UUID, db: Session) -> TeacherProfile:
     if not profile:
         raise HTTPException(status_code=404, detail="Teacher profile not found.")
     return profile
+
+
+def _resolve_student_batch_checkout(
+    *,
+    batch_id: UUID,
+    student_profile: StudentProfile,
+    db: Session,
+) -> tuple[Batch, TeacherProfile, User, int | None]:
+    batch = db.query(Batch).filter(
+        and_(
+            Batch.id == batch_id,
+            Batch.is_active == True,
+            Batch.student_selection_enabled == True,
+        )
+    ).first()
+    if not batch:
+        raise HTTPException(status_code=404, detail="Selected batch is unavailable.")
+
+    teacher_profile = db.query(TeacherProfile).filter(TeacherProfile.id == batch.teacher_id).first()
+    if not teacher_profile:
+        raise HTTPException(status_code=404, detail="Teacher profile not found.")
+    teacher_user = db.query(User).filter(
+        and_(
+            User.id == teacher_profile.user_id,
+            User.is_active == True,
+        )
+    ).first()
+    if not teacher_user:
+        raise HTTPException(status_code=404, detail="Teacher not found.")
+
+    seats_left: int | None = None
+    if batch.max_students is not None:
+        member_count = db.query(BatchMember).filter(BatchMember.batch_id == batch.id).count()
+        seats_left = int(batch.max_students) - member_count
+        if seats_left <= 0:
+            raise HTTPException(status_code=409, detail="Selected batch is full.")
+
+    if batch.grade_level is not None and student_profile.grade is not None:
+        if int(batch.grade_level) != int(student_profile.grade):
+            raise HTTPException(status_code=409, detail="Selected batch is not available for your class.")
+
+    return batch, teacher_profile, teacher_user, seats_left
 
 
 def _build_response(req: TuitionRequest, db: Session) -> TuitionRequestResponse:
@@ -195,7 +196,156 @@ def _build_response(req: TuitionRequest, db: Session) -> TuitionRequestResponse:
     )
 
 
-# ── Student Endpoints ─────────────────────────────────────────────────────────
+# â”€â”€ Student Endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+@router.get(
+    "/batches/{batch_id}/checkout",
+    response_model=BatchCheckoutResponse,
+    summary="Get batch checkout details for student",
+)
+def get_batch_checkout(
+    batch_id: UUID,
+    current_user: User = Depends(require_login),
+    db: Session = Depends(get_db),
+):
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="Student access only.")
+
+    student_profile = _get_student_profile(current_user.id, db)
+    batch, teacher_profile, teacher_user, seats_left = _resolve_student_batch_checkout(
+        batch_id=batch_id,
+        student_profile=student_profile,
+        db=db,
+    )
+    return BatchCheckoutResponse(
+        batch_id=batch.id,
+        batch_name=batch.name,
+        subject=batch.subject,
+        description=batch.description,
+        grade_level=batch.grade_level,
+        class_timing=batch.default_timing,
+        class_days=batch.class_days or [],
+        max_students=batch.max_students,
+        seats_left=seats_left,
+        fee_paise=int(batch.fee_paise or 0),
+        fee_rupees=(batch.fee_paise or 0) / 100,
+        teacher_id=teacher_profile.id,
+        teacher_name=teacher_user.full_name,
+        teacher_avatar_url=teacher_user.avatar_url,
+        teacher_is_verified=teacher_profile.is_verified,
+        teacher_profile_url=f"/teacher-profile.html?teacher_id={teacher_profile.id}",
+    )
+
+
+@router.post(
+    "/batches/{batch_id}/payment/init",
+    response_model=BatchPaymentInitResponse,
+    summary="Create payment link for joining a batch",
+)
+def init_batch_payment(
+    batch_id: UUID,
+    payload: BatchPaymentInitRequest,
+    current_user: User = Depends(require_login),
+    db: Session = Depends(get_db),
+):
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="Student access only.")
+
+    student_profile = _get_student_profile(current_user.id, db)
+    batch, teacher_profile, teacher_user, _ = _resolve_student_batch_checkout(
+        batch_id=batch_id,
+        student_profile=student_profile,
+        db=db,
+    )
+    subject_text = (payload.subject or batch.subject or "").strip()
+    if not subject_text:
+        raise HTTPException(status_code=422, detail="Subject is required for checkout.")
+
+    already_enrolled = db.query(Enrollment).filter(
+        and_(
+            Enrollment.student_id == student_profile.id,
+            Enrollment.teacher_id == teacher_profile.id,
+            Enrollment.subject == subject_text,
+            Enrollment.is_active == True,
+        )
+    ).first()
+    if already_enrolled:
+        raise HTTPException(status_code=409, detail=f"Already enrolled for {subject_text}.")
+
+    existing_pending = db.query(TuitionRequest).filter(
+        and_(
+            TuitionRequest.student_id == student_profile.id,
+            TuitionRequest.teacher_id == teacher_profile.id,
+            TuitionRequest.batch_id == batch.id,
+            TuitionRequest.subject == subject_text,
+            TuitionRequest.status == "pending",
+        )
+    ).first()
+    if existing_pending:
+        raise HTTPException(status_code=409, detail="A pending request for this batch already exists.")
+
+    amount_paise = int(batch.fee_paise or 0)
+    if amount_paise <= 0:
+        return BatchPaymentInitResponse(
+            payment_link="",
+            amount_paise=0,
+            amount_rupees=0.0,
+            currency="INR",
+            mode="free",
+            message="This batch currently has no fee configured.",
+        )
+
+    has_keys = bool(settings.razorpay_key_id and settings.razorpay_key_secret)
+    if not has_keys:
+        return BatchPaymentInitResponse(
+            payment_link="https://rzp.io/mock-checkout",
+            amount_paise=amount_paise,
+            amount_rupees=amount_paise / 100,
+            currency="INR",
+            mode="mock",
+            message="Razorpay is not configured in this environment. Use mock checkout for local testing.",
+        )
+
+    callback_url = (payload.callback_url or "").strip() or None
+    try:
+        link = razorpay_service.create_payment_link(
+            amount_paise=amount_paise,
+            description=f"tamgam batch join: {batch.name}",
+            customer_name=current_user.full_name,
+            customer_email=current_user.email,
+            callback_url=callback_url,
+            notes={
+                "kind": "batch_join",
+                "batch_id": str(batch.id),
+                "teacher_id": str(teacher_profile.id),
+                "teacher_name": teacher_user.full_name,
+                "student_user_id": str(current_user.id),
+                "subject": subject_text,
+            },
+        )
+        payment_link = str(link.get("short_url") or "").strip()
+        if not payment_link:
+            raise RuntimeError("Razorpay did not return a hosted payment link.")
+        return BatchPaymentInitResponse(
+            payment_link=payment_link,
+            amount_paise=amount_paise,
+            amount_rupees=amount_paise / 100,
+            currency="INR",
+            mode="razorpay",
+            message="Payment link created.",
+        )
+    except Exception as exc:
+        if settings.app_env == "production":
+            raise HTTPException(status_code=502, detail=f"Failed to create payment link: {exc}") from exc
+        return BatchPaymentInitResponse(
+            payment_link="https://rzp.io/mock-checkout",
+            amount_paise=amount_paise,
+            amount_rupees=amount_paise / 100,
+            currency="INR",
+            mode="mock",
+            message=f"Razorpay link failed in dev mode ({exc}). Falling back to mock checkout.",
+        )
+
 
 @router.post(
     "/",
@@ -234,23 +384,13 @@ def create_tuition_request(
 
     selected_batch = None
     if payload.batch_id:
-        selected_batch = db.query(Batch).filter(
-            and_(
-                Batch.id == payload.batch_id,
-                Batch.teacher_id == teacher_profile.id,
-                Batch.is_active == True,
-                Batch.student_selection_enabled == True,
-            )
-        ).first()
-        if not selected_batch:
-            raise HTTPException(status_code=404, detail="Selected batch is unavailable.")
-        if selected_batch.max_students is not None:
-            member_count = db.query(BatchMember).filter(BatchMember.batch_id == selected_batch.id).count()
-            if member_count >= selected_batch.max_students:
-                raise HTTPException(status_code=409, detail="Selected batch is full.")
-        if selected_batch.grade_level is not None and student_profile.grade is not None:
-            if selected_batch.grade_level != student_profile.grade:
-                raise HTTPException(status_code=409, detail="Selected batch is not available for your class.")
+        selected_batch, _, _, _ = _resolve_student_batch_checkout(
+            batch_id=payload.batch_id,
+            student_profile=student_profile,
+            db=db,
+        )
+        if selected_batch.teacher_id != teacher_profile.id:
+            raise HTTPException(status_code=409, detail="Selected batch does not belong to this teacher.")
 
     # Block if already enrolled with this teacher for this subject
     already_enrolled = db.query(Enrollment).filter(
@@ -280,19 +420,6 @@ def create_tuition_request(
         raise HTTPException(
             status_code=409,
             detail="A pending request to this teacher for this subject already exists.",
-        )
-
-    # If subscribed, enforce plan cap before allowing new requests.
-    # This prevents basic/standard/pro users from creating requests beyond
-    # their allowed concurrent tutor/subject enrollments.
-    active_sub = _get_active_subscription_with_plan(current_user.id, db)
-    if active_sub:
-        _, plan = active_sub
-        _enforce_plan_enrollment_cap(
-            student_profile.id,
-            plan.slug,
-            db,
-            include_pending_requests=True,
         )
 
     req = TuitionRequest(
@@ -430,7 +557,7 @@ def cancel_request(
     return MessageResponse(message="Tuition request cancelled.")
 
 
-# ── Teacher Endpoints ─────────────────────────────────────────────────────────
+# â”€â”€ Teacher Endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get(
     "/incoming",
@@ -552,11 +679,11 @@ def accept_request(
 ):
     """
     Teacher accepts a tuition request.
-    If the student has an active subscription, an Enrollment is auto-created.
-    If not, request is accepted and student is prompted to choose a plan.
+    Enrollment is created immediately (student access is free).
     """
     if current_user.role != "teacher":
         raise HTTPException(status_code=403, detail="Teacher access only.")
+    ensure_teacher_billing_active(current_user, db)
 
     teacher_profile = _get_teacher_profile(current_user.id, db)
     _sync_due_unenrollments(db, teacher_id=teacher_profile.id)
@@ -583,8 +710,6 @@ def accept_request(
     if not student_profile:
         raise HTTPException(status_code=404, detail="Student profile not found.")
     _sync_due_unenrollments(db, student_profile_id=student_profile.id, teacher_id=teacher_profile.id)
-    active_sub = _get_active_subscription_with_plan(student_profile.user_id, db)
-    student_is_subscribed = active_sub is not None
 
     # Check not already enrolled (safety guard)
     existing_enrollment = db.query(Enrollment).filter(
@@ -601,24 +726,34 @@ def accept_request(
             detail="Student is already enrolled for this subject.",
         )
 
-    # Create enrollment only if student is currently subscribed.
-    # If not subscribed, keep request as accepted and prompt plan purchase in notification.
-    enrollment = None
-    if student_is_subscribed:
-        _, plan = active_sub
-        _enforce_plan_enrollment_cap(student_profile.id, plan.slug, db)
-        enrollment = Enrollment(
-            student_id=req.student_id,
-            teacher_id=teacher_profile.id,
-            subject=req.subject,
-            is_active=True,
-        )
-        db.add(enrollment)
-        db.flush()  # Get enrollment.id before commit
+    enrollment = Enrollment(
+        student_id=req.student_id,
+        teacher_id=teacher_profile.id,
+        subject=req.subject,
+        is_active=True,
+    )
+    db.add(enrollment)
+    db.flush()  # Get enrollment.id before commit
+
+    # Accrue tracked teacher income from the selected batch fee.
+    gross = 0
+    if req.batch_id:
+        selected_batch = db.query(Batch).filter(
+            and_(
+                Batch.id == req.batch_id,
+                Batch.teacher_id == teacher_profile.id,
+            )
+        ).first()
+        gross = int(selected_batch.fee_paise or 0) if selected_batch else 0
+    if gross > 0:
+        teacher_profile.total_revenue_paise = int(teacher_profile.total_revenue_paise or 0) + gross
+        rate = _teacher_commission_rate(int(teacher_profile.total_revenue_paise or 0))
+        commission = int(round(gross * rate / 100.0))
+        teacher_profile.platform_commission_paise = int(teacher_profile.platform_commission_paise or 0) + commission
 
     # Update request
     req.status = "accepted"
-    req.enrollment_id = enrollment.id if enrollment else None
+    req.enrollment_id = enrollment.id
     req.responded_at = datetime.now(timezone.utc)
     req.updated_at = datetime.now(timezone.utc)
 
@@ -636,27 +771,21 @@ def accept_request(
         teacher_notif.is_read = True
 
     # Notify student on acceptance.
-    # If student has no active subscription, send CTA to plans page.
     db.add(Notification(
         user_id=student_profile.user_id,
         notification_type="announcement",
         title="Tuition request accepted",
         body=(
             f"Your tuition request for {req.subject} was accepted by the teacher. "
-            + (
-                "You are now enrolled and can attend classes from your dashboard."
-                if student_is_subscribed
-                else
-                "Please choose a plan to enroll. Without an active subscription, you cannot attend classes."
-            )
+            "You are now enrolled and can attend classes from your dashboard."
         ),
-        action_url="/dashboard.html" if student_is_subscribed else "/plans.html",
+        action_url="/dashboard.html",
         extra_data={
             "kind": "tuition_request_accepted",
             "request_id": str(req.id),
             "teacher_id": str(teacher_profile.id),
             "subject": req.subject,
-            "requires_subscription": not student_is_subscribed,
+            "tracked_fee_paise": gross,
         },
         is_read=False,
     ))
@@ -689,6 +818,7 @@ def decline_request(
     """Teacher declines a request with an optional reason."""
     if current_user.role != "teacher":
         raise HTTPException(status_code=403, detail="Teacher access only.")
+    ensure_teacher_billing_active(current_user, db)
 
     teacher_profile = _get_teacher_profile(current_user.id, db)
 
@@ -754,7 +884,7 @@ def decline_request(
     return _build_response(req, db)
 
 
-# ── Teacher: Search Students ──────────────────────────────────────────────────
+# â”€â”€ Teacher: Search Students â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get(
     "/students/search",
@@ -766,7 +896,7 @@ def search_students(
     city: Optional[str] = Query(None, description="Filter by city"),
     state: Optional[str] = Query(None, description="Filter by state"),
     subject: Optional[str] = Query(None, description="Filter students not yet enrolled for this subject"),
-    subscribed_only: bool = Query(True, description="Only show subscribed students"),
+    subscribed_only: bool = Query(False, description="Legacy filter; students are free by default."),
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     current_user: User = Depends(require_login),
@@ -799,9 +929,7 @@ def search_students(
         StudentProfile.performance_score.desc()
     ).offset(skip).limit(limit).all()
 
-    subscribed_user_ids = {
-        user.id for _, user in results if get_effective_active_subscription(user.id, db)
-    }
+    subscribed_user_ids = {user.id for _, user in results if _is_subscribed(user.id, db)}
 
     # Build already-enrolled student_ids for this teacher
     enrolled_student_ids = set(
@@ -848,3 +976,4 @@ def search_students(
         ))
 
     return items
+
