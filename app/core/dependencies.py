@@ -179,9 +179,8 @@ def require_subscription(
     db: Session = Depends(get_db),
 ) -> User:
     """
-    Legacy dependency retained for backward-compatible endpoint wiring.
-    All authenticated users now pass because student access is free and
-    teacher billing is handled separately.
+    Requires an active subscription for students.
+    Teachers and admins always pass this gate.
 
     Use for: Notes, AI Tutor, Assessments, Meet links.
     """
@@ -191,6 +190,20 @@ def require_subscription(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required.",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if user.role in ("teacher", "admin"):
+        return user
+
+    active_sub = get_effective_active_subscription(user.id, db)
+    if not active_sub:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "message": "This feature requires an active subscription.",
+                "cta": "View plans",
+                "redirect": "/pricing",
+            },
         )
 
     return user

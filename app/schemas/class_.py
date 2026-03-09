@@ -118,7 +118,7 @@ class BatchCreateRequest(BaseModel):
     name: str
     subject: Optional[str] = None
     class_timing: Optional[str] = None
-    fee_paise: int = Field(gt=0)
+    fee_paise: int = Field(default=0, ge=0)
     description: Optional[str] = None
     grade_level: Optional[int] = None
     max_students: Optional[int] = None

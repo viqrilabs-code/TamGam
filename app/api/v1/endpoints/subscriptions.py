@@ -76,16 +76,16 @@ def _format_razorpay_error(exc: Exception) -> str:
 def _teacher_commission_rate(total_revenue_paise: int) -> float:
     """
     Commission tiers for teacher income:
-      up to Rs 50,000      -> 20%
-      Rs 50,001-2,00,000   -> 15%
-      above Rs 2,00,000    -> 10%
+      up to Rs 25,000      -> 25%
+      Rs 25,001-75,000     -> 20%
+      above Rs 75,000      -> 15%
     """
     total_rupees = (total_revenue_paise or 0) / 100
-    if total_rupees <= 50000:
+    if total_rupees <= 25000:
+        return 25.0
+    if total_rupees <= 75000:
         return 20.0
-    if total_rupees <= 200000:
-        return 15.0
-    return 10.0
+    return 15.0
 
 
 def _epoch_to_utc(value) -> datetime | None:

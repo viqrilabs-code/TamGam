@@ -70,9 +70,11 @@ def get_active_plan(user_id: UUID, db: Session) -> Optional[Plan]:
 def get_limit_for_user(user_id: UUID, feature_key: str, db: Session) -> Optional[int]:
     plan = get_active_plan(user_id, db)
     if not plan:
+        if db is None:
+            return None
         user = db.query(User).filter(User.id == user_id).first()
         if user and user.role == "student":
-            return -1
+            return None
         return None
     slug = (plan.slug or "").strip().lower()
     return PLAN_LIMITS.get(slug, {}).get(feature_key)
