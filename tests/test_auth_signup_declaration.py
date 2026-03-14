@@ -49,14 +49,21 @@ def test_firebase_phone_login_schema_trims_fields():
     req = FirebasePhoneLoginRequest(
         id_token="  token-123  ",
         full_name="  Student One  ",
+        role=" Teacher ",
     )
     assert req.id_token == "token-123"
     assert req.full_name == "Student One"
+    assert req.role == "teacher"
 
 
 def test_firebase_phone_login_schema_rejects_empty_token():
     with pytest.raises(ValueError):
         FirebasePhoneLoginRequest(id_token="   ")
+
+
+def test_firebase_phone_login_schema_rejects_invalid_role():
+    with pytest.raises(ValueError):
+        FirebasePhoneLoginRequest(id_token="token-123", role="parent")
 
 
 def test_email_login_code_send_request_accepts_valid_payload():

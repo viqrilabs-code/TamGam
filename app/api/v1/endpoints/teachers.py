@@ -51,8 +51,8 @@ from app.schemas.teacher_rating import TeacherRatingPublicItem, TeacherRatingSum
 
 router = APIRouter()
 logger = logging.getLogger("tamgam.teachers")
-# X (platform fee) rounded to Rs 250 from break-even estimate at 10 teachers x 5 students each.
-TEACHER_PLATFORM_MONTHLY_FEE_PAISE = 25000
+# Promotional flat platform fee.
+TEACHER_PLATFORM_MONTHLY_FEE_PAISE = 9900
 
 
 # â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -128,17 +128,9 @@ def _build_student_verification_items(
 
 def _commission_rate(total_revenue_paise: int) -> float:
     """
-    Commission tiers (on total tracked revenue):
-      0 â€“ 50,000 rupees    â†’ 20%
-      50,001 â€“ 2,00,000    â†’ 15%
-      2,00,001+            â†’ 10%
+    Promotional flat commission on total tracked revenue.
     """
-    total_rupees = total_revenue_paise / 100
-    if total_rupees <= 50000:
-        return 20.0
-    if total_rupees <= 200000:
-        return 15.0
-    return 10.0
+    return 5.0
 
 
 def _safe_float(value: Any) -> Optional[float]:
@@ -879,10 +871,7 @@ def get_my_earnings(
 ):
     """
     Teacher earnings breakdown with current commission tier.
-    Commission tiers based on total lifetime revenue:
-      0 â€“ 50K rupees    â†’ 20%
-      50K â€“ 2L rupees   â†’ 15%
-      2L+ rupees         â†’ 10%
+    Commission is flat 5% for the current promotional offer.
     """
     profile = db.query(TeacherProfile).filter(
         TeacherProfile.user_id == current_user.id

@@ -206,3 +206,10 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 secrets/firebase-admin.json
+
+# Android release artifacts / signing
+*.jks
+*.keystore
+tamgam-android-app/keystore.properties
+tamgam-android-app/app/release/
+tamgam-android-app/app/build/

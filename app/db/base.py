@@ -45,3 +45,4 @@ from app.models.contact_complaint import ContactComplaint             # noqa: F4
 from app.models.payout import TeacherPayout                           # noqa: F401, E402
 from app.models.email_login_code import EmailLoginCode                # noqa: F401, E402
 from app.models.teacher_rating import TeacherRating                   # noqa: F401, E402
+from app.models.password_reset_token import PasswordResetToken        # noqa: F401, E402

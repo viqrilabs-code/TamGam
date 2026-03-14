@@ -267,7 +267,7 @@ class EarningsResponse(BaseModel):
     total_revenue_paise: int
     platform_commission_paise: int
     net_earnings_paise: int
-    current_commission_rate_percent: float  # 20 | 15 | 10
+    current_commission_rate_percent: float  # promotional flat rate (5)
     total_revenue_rupees: float             # Convenience field
     net_earnings_rupees: float
     # UI compatibility fields (legacy cards expect these keys)

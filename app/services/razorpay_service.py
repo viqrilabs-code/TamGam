@@ -20,11 +20,28 @@ from app.core.config import settings
 logger = logging.getLogger("tamgam.razorpay")
 
 
+def get_public_key_id() -> str:
+    """Razorpay public key id (safe for frontend)."""
+    return (settings.razorpay_key_id or "").strip()
+
+
+def _get_secret_key() -> str:
+    """Razorpay secret key used server-side only."""
+    return (settings.razorpay_key_secret or "").strip()
+
+
+def has_credentials() -> bool:
+    """True when both key_id and key_secret are configured."""
+    return bool(get_public_key_id() and _get_secret_key())
+
+
 def get_razorpay_client() -> razorpay.Client:
     """Return authenticated Razorpay client."""
-    logger.debug("Initializing Razorpay client configured=%s", bool(settings.razorpay_key_id and settings.razorpay_key_secret))
+    key_id = get_public_key_id()
+    key_secret = _get_secret_key()
+    logger.debug("Initializing Razorpay client configured=%s", bool(key_id and key_secret))
     return razorpay.Client(
-        auth=(settings.razorpay_key_id, settings.razorpay_key_secret)
+        auth=(key_id, key_secret)
     )
 
 
@@ -275,6 +292,8 @@ RAZORPAY_TO_OUR_STATUS = {
     "active": "active",
     "pending": "past_due",
     "halted": "past_due",
+    "paused": "past_due",
+    "resumed": "active",
     "cancelled": "cancelled",
     "completed": "cancelled",
     "expired": "cancelled",
@@ -288,11 +307,15 @@ def map_status(razorpay_status: str) -> str:
 
 # ── Webhook Event Types We Handle ────────────────────────────────────────────
 HANDLED_EVENTS = {
+    "subscription.authenticated", # Auth transaction done (can be pending/active based on schedule)
     "subscription.activated",    # First payment succeeded -- mark active
     "subscription.charged",      # Recurring payment succeeded
     "subscription.pending",      # Payment failed, retrying
     "subscription.halted",       # Too many retries -- access revoked
+    "subscription.paused",       # Subscription paused
+    "subscription.resumed",      # Subscription resumed
     "subscription.cancelled",    # Cancelled
     "subscription.completed",    # All cycles done
+    "payment.failed",            # Charge attempt failed
     "payment.captured",          # Individual payment captured
 }

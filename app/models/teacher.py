@@ -69,10 +69,8 @@ class TeacherProfile(Base):
     # ── Earnings (private — admin + teacher only) ─────────────────────────────
     total_revenue_paise = Column(Integer, nullable=False, default=0)
     platform_commission_paise = Column(Integer, nullable=False, default=0)
-    # Commission tiers:
-    #   0 – 50,000  → 20%
-    #   50,001 – 2,00,000 → 15%
-    #   2,00,001+ → 10%
+    # Promotional commission:
+    #   Flat 5% on tracked revenue
 
     # ── Bank Account (private — admin + teacher only) ─────────────────────────
     bank_account_name = Column(String(255), nullable=True)

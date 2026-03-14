@@ -72,6 +72,10 @@ class ForgotPasswordCodeSendRequest(BaseModel):
     email: EmailStr
 
 
+class ForgotPasswordLinkSendRequest(BaseModel):
+    email: EmailStr
+
+
 class EmailLoginCodeSendResponse(BaseModel):
     message: str
     resend_after_seconds: int
@@ -112,9 +116,32 @@ class ForgotPasswordResetRequest(BaseModel):
         return v
 
 
+class ForgotPasswordTokenResetRequest(BaseModel):
+    reset_token: str
+    new_password: str
+
+    @field_validator("reset_token")
+    @classmethod
+    def reset_token_not_empty(cls, v: str) -> str:
+        value = (v or "").strip()
+        if not value:
+            raise ValueError("reset_token is required")
+        return value
+
+    @field_validator("new_password")
+    @classmethod
+    def forgot_password_link_strength(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("new_password must be at least 8 characters")
+        return v
+
+
 class FirebasePhoneLoginRequest(BaseModel):
     id_token: str
     full_name: Optional[str] = None
+    role: str = "student"  # student | teacher
+    teacher_declaration_accepted: bool = False
+    teacher_declaration_version: Optional[str] = None
 
     @field_validator("id_token")
     @classmethod
@@ -131,6 +158,22 @@ class FirebasePhoneLoginRequest(BaseModel):
             return None
         trimmed = v.strip()
         return trimmed or None
+
+    @field_validator("role")
+    @classmethod
+    def firebase_role_valid(cls, v: str) -> str:
+        role = (v or "").strip().lower()
+        if role not in ("student", "teacher"):
+            raise ValueError("Role must be 'student' or 'teacher'")
+        return role
+
+    @field_validator("teacher_declaration_version")
+    @classmethod
+    def firebase_teacher_declaration_version_trim(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        value = v.strip()
+        return value or None
 
 
 class TokenResponse(BaseModel):

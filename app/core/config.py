@@ -36,7 +36,8 @@ class Settings(BaseSettings):
     allowed_origins: str = "http://localhost:3000,http://localhost:8000"
 
     # Database
-    database_url: str
+    # Optional because production builds derive DB URL from Cloud SQL socket vars.
+    database_url: str = ""
     auto_migrate_on_startup: bool = True
     db_pool_size: int = 5
     db_max_overflow: int = 10
@@ -127,6 +128,8 @@ class Settings(BaseSettings):
     email_login_code_ttl_minutes: int = 10
     email_login_code_resend_cooldown_seconds: int = 45
     email_login_code_max_attempts: int = 5
+    password_reset_link_ttl_minutes: int = 30
+    password_reset_frontend_url: str = "https://tamgam.in/reset-password.html"
 
     # AI Tutor RAG
     rag_chunk_size: int = 500

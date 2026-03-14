@@ -228,13 +228,12 @@ refresh_tokens                 # JWT refresh token rotation
 
 ### Teacher Plans
 
-Teachers earn via **platform commission**:
+Teachers are billed via **platform fee + commission**:
 
-| Monthly Revenue | Commission |
+| Item | Value |
 |---|---|
-| ₹0 – ₹50,000 | 20% |
-| ₹50,001 – ₹2,00,000 | 15% |
-| ₹2,00,001+ | 10% |
+| Platform fee (monthly) | Rs 99 |
+| Commission | Flat 5% |
 
 Optional verified teacher subscription (₹299–₹799/month) for T mark + advanced features.
 

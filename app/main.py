@@ -4,6 +4,7 @@
 import logging
 import time
 import uuid
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -22,6 +23,26 @@ from app.db.session import check_db_connection, engine
 
 configure_logging(debug=settings.debug)
 logger = logging.getLogger("tamgam.main")
+STARTUP_DB_CHECK_TIMEOUT_SECONDS = 2.0
+
+
+async def _check_db_connection_with_timeout(timeout_seconds: float) -> bool | None:
+    """
+    Run DB availability probe without blocking startup for long connector timeouts.
+    Returns:
+      True  -> DB reachable
+      False -> DB probe completed and failed
+      None  -> Probe timed out
+    """
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(check_db_connection),
+            timeout=timeout_seconds,
+        )
+    except asyncio.TimeoutError:
+        return None
+    except Exception:
+        return False
 
 
 def _redis_check_enabled() -> bool:
@@ -46,10 +67,16 @@ async def lifespan(app: FastAPI):
     if settings.auto_migrate_on_startup:
         run_startup_migrations()
 
-    if check_db_connection():
+    db_ok = await _check_db_connection_with_timeout(STARTUP_DB_CHECK_TIMEOUT_SECONDS)
+    if db_ok is True:
         logger.info("Database connection: OK")
-    else:
+    elif db_ok is False:
         logger.warning("Database connection failed -- check DATABASE_URL")
+    else:
+        logger.warning(
+            "Database connection check timed out after %.1fs -- continuing startup",
+            STARTUP_DB_CHECK_TIMEOUT_SECONDS,
+        )
 
     if _redis_check_enabled():
         try:

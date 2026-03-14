@@ -53,6 +53,7 @@ class CreateSubscriptionResponse(BaseModel):
     subscription_id: UUID              # Our DB record ID
     razorpay_subscription_id: str
     payment_link: str                  # Razorpay hosted checkout URL
+    razorpay_key_id: Optional[str] = None
     plan_name: str
     amount_paise: int
     billing_cycle: str

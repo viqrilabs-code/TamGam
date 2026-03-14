@@ -8,6 +8,7 @@
 # GET  /auth/google          -- redirect to Google OAuth
 # GET  /auth/google/callback -- exchange code for tokens
 
+import base64
 from datetime import datetime, timezone
 import json
 import re
@@ -17,6 +18,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import and_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -33,6 +35,7 @@ from app.core.security import (
 from app.db.session import get_db
 import app.db.base  # noqa: F401 -- registers all models so relationships resolve
 from app.models.student import StudentProfile
+from app.models.subscription import Plan, Subscription
 from app.models.teacher import TeacherProfile
 from app.models.user import RefreshToken, User
 from app.schemas.auth import (
@@ -42,7 +45,9 @@ from app.schemas.auth import (
     EmailLoginCodeSendResponse,
     FirebasePhoneLoginRequest,
     ForgotPasswordCodeSendRequest,
+    ForgotPasswordLinkSendRequest,
     ForgotPasswordResetRequest,
+    ForgotPasswordTokenResetRequest,
     GoogleCallbackResponse,
     LoginRequest,
     LogoutRequest,
@@ -64,6 +69,13 @@ from app.services.email_login_code import (
     EmailLoginCodeInvalidError,
     issue_login_code,
     verify_login_code,
+)
+from app.services.password_reset_link import (
+    PasswordResetLinkConfigError,
+    PasswordResetLinkDeliveryError,
+    PasswordResetLinkInvalidError,
+    consume_password_reset_link,
+    issue_password_reset_link,
 )
 
 router = APIRouter()
@@ -140,7 +152,67 @@ def _oauth_success_html(payload: dict) -> HTMLResponse:
     return HTMLResponse(content=html, status_code=200)
 
 
+def _set_teacher_declaration_fields(
+    user: User,
+    *,
+    request: Request | None,
+    declaration_version: str | None,
+) -> None:
+    ip_addr = request.client.host if request and request.client else None
+    user.teacher_payout_declaration_accepted = True
+    user.teacher_payout_declaration_accepted_at = datetime.now(timezone.utc)
+    user.teacher_payout_declaration_version = (
+        declaration_version or TEACHER_PAYOUT_DECLARATION_VERSION
+    )[:64]
+    user.teacher_payout_declaration_ip = (ip_addr or "")[:64] or None
+
+
+def _ensure_teacher_profile_exists(user: User, db: Session) -> None:
+    profile = db.query(TeacherProfile).filter(TeacherProfile.user_id == user.id).first()
+    if not profile:
+        db.add(TeacherProfile(user_id=user.id))
+        db.flush()
+
+
+def _sync_teacher_role_from_billing(user: User, db: Session) -> None:
+    """
+    Backfill role when historical data has a teacher plan/profile but role stayed student.
+    """
+    if user.role in ("teacher", "admin"):
+        if user.role == "teacher":
+            _ensure_teacher_profile_exists(user, db)
+        return
+
+    has_teacher_profile = (
+        db.query(TeacherProfile.id)
+        .filter(TeacherProfile.user_id == user.id)
+        .first()
+        is not None
+    )
+    if not has_teacher_profile:
+        has_teacher_subscription = (
+            db.query(Subscription.id)
+            .join(Plan, Plan.id == Subscription.plan_id)
+            .filter(
+                and_(
+                    Subscription.user_id == user.id,
+                    Plan.slug == "teacher-platform",
+                    Subscription.status.in_(("active", "pending", "past_due")),
+                )
+            )
+            .first()
+            is not None
+        )
+    else:
+        has_teacher_subscription = False
+
+    if has_teacher_profile or has_teacher_subscription:
+        user.role = "teacher"
+        _ensure_teacher_profile_exists(user, db)
+
+
 def _build_token_response(user: User, db: Session) -> TokenResponse:
+    _sync_teacher_role_from_billing(user, db)
     access_token = create_access_token(user.id, user.role)
     refresh_token = create_refresh_token(user.id)
     db_token = RefreshToken(
@@ -168,6 +240,63 @@ def _create_role_profile(user: User, db: Session) -> None:
         db.add(StudentProfile(user_id=user.id))
     elif user.role == "teacher":
         db.add(TeacherProfile(user_id=user.id))
+
+
+def _build_google_state_payload(
+    *,
+    mode: str,
+    role: str | None,
+    teacher_declaration_accepted: bool,
+    teacher_declaration_version: str | None,
+) -> str:
+    payload: dict[str, object] = {"m": mode}
+    safe_role = (role or "student").strip().lower()
+    if safe_role in ("student", "teacher"):
+        payload["r"] = safe_role
+    if safe_role == "teacher":
+        payload["tda"] = bool(teacher_declaration_accepted)
+        if teacher_declaration_version:
+            payload["tdv"] = teacher_declaration_version.strip()[:64]
+    raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    return "tg." + base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _parse_google_state_payload(raw_state: str | None) -> dict:
+    default = {
+        "mode": "web",
+        "role": "student",
+        "teacher_declaration_accepted": False,
+        "teacher_declaration_version": None,
+    }
+    token = (raw_state or "").strip()
+    if token in {"web", "json"}:
+        default["mode"] = token
+        return default
+    if not token.startswith("tg."):
+        return default
+
+    encoded = token[3:]
+    padding = "=" * (-len(encoded) % 4)
+    try:
+        decoded = base64.urlsafe_b64decode((encoded + padding).encode("ascii")).decode("utf-8")
+        payload = json.loads(decoded)
+    except Exception:
+        return default
+
+    mode = str(payload.get("m") or "").strip().lower()
+    role = str(payload.get("r") or "").strip().lower()
+    declaration_version = payload.get("tdv")
+
+    if mode in {"web", "json"}:
+        default["mode"] = mode
+    if role in {"student", "teacher"}:
+        default["role"] = role
+
+    default["teacher_declaration_accepted"] = bool(payload.get("tda"))
+    if isinstance(declaration_version, str):
+        trimmed = declaration_version.strip()
+        default["teacher_declaration_version"] = trimmed[:64] if trimmed else None
+    return default
 
 
 def _normalize_phone_number(raw_phone: str) -> str:
@@ -226,15 +355,17 @@ def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_d
         is_email_verified=True,
     )
     if payload.role == "teacher":
-        ip_addr = request.client.host if request and request.client else None
-        user.teacher_payout_declaration_accepted = True
-        user.teacher_payout_declaration_accepted_at = datetime.now(timezone.utc)
-        user.teacher_payout_declaration_version = (
-            payload.teacher_declaration_version or TEACHER_PAYOUT_DECLARATION_VERSION
-        )[:64]
-        user.teacher_payout_declaration_ip = (ip_addr or "")[:64] or None
+        _set_teacher_declaration_fields(
+            user,
+            request=request,
+            declaration_version=payload.teacher_declaration_version,
+        )
     db.add(user)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="An account with this email already exists.")
     _create_role_profile(user, db)
     response = _build_token_response(user, db)
     db.commit()
@@ -364,6 +495,30 @@ def send_forgot_password_code(
 
 
 @router.post(
+    "/forgot-password/send-link",
+    response_model=MessageResponse,
+    summary="Send forgot-password reset link",
+)
+def send_forgot_password_link(
+    payload: ForgotPasswordLinkSendRequest,
+    db: Session = Depends(get_db),
+):
+    user = _get_active_user_by_email(db, str(payload.email))
+    if user:
+        try:
+            issue_password_reset_link(db, user)
+        except PasswordResetLinkConfigError as exc:
+            db.rollback()
+            raise HTTPException(status_code=503, detail=str(exc))
+        except PasswordResetLinkDeliveryError as exc:
+            db.rollback()
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    db.commit()
+    return MessageResponse(message="If this email is registered, a password reset link has been sent.")
+
+
+@router.post(
     "/forgot-password/reset",
     response_model=MessageResponse,
     summary="Reset password with email verification code",
@@ -390,6 +545,29 @@ def reset_forgot_password(
 
 
 @router.post(
+    "/forgot-password/reset-with-token",
+    response_model=MessageResponse,
+    summary="Reset password using one-time reset link token",
+)
+def reset_forgot_password_with_token(
+    payload: ForgotPasswordTokenResetRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        user = consume_password_reset_link(db, payload.reset_token)
+    except PasswordResetLinkInvalidError as exc:
+        db.rollback()
+        raise HTTPException(status_code=401, detail=str(exc))
+
+    user.hashed_password = hash_password(payload.new_password)
+    db.query(RefreshToken).filter(
+        and_(RefreshToken.user_id == user.id, RefreshToken.is_revoked == False)
+    ).update({"is_revoked": True}, synchronize_session=False)
+    db.commit()
+    return MessageResponse(message="Password has been reset. Please log in again.")
+
+
+@router.post(
     "/firebase-phone",
     response_model=TokenResponse,
     summary="Log in with Firebase phone verification",
@@ -404,6 +582,7 @@ def firebase_phone_login(payload: FirebasePhoneLoginRequest, db: Session = Depen
 
     phone_e164 = _normalize_phone_number(str(firebase_claims.get("phone_number") or ""))
     generated_email = _build_phone_email(phone_e164)
+    requested_role = payload.role
 
     inactive_phone_user = db.query(User).filter(and_(User.phone == phone_e164, User.is_active == False)).first()
     if inactive_phone_user:
@@ -417,17 +596,28 @@ def firebase_phone_login(payload: FirebasePhoneLoginRequest, db: Session = Depen
         user = db.query(User).filter(and_(User.email == generated_email, User.is_active == True)).first()
 
     if not user:
+        if requested_role == "teacher" and not payload.teacher_declaration_accepted:
+            raise HTTPException(
+                status_code=400,
+                detail="Teacher payout declaration consent is required.",
+            )
         fallback_name = (payload.full_name or "").strip() or str(firebase_claims.get("name") or "").strip()
         user = User(
             email=generated_email,
             hashed_password=None,
-            full_name=fallback_name or "tamgam Student",
-            role="student",
+            full_name=fallback_name or ("tamgam Teacher" if requested_role == "teacher" else "tamgam Student"),
+            role=requested_role,
             auth_provider="email",
             is_active=True,
             is_email_verified=True,
             phone=phone_e164,
         )
+        if requested_role == "teacher":
+            _set_teacher_declaration_fields(
+                user,
+                request=None,
+                declaration_version=payload.teacher_declaration_version,
+            )
         db.add(user)
         db.flush()
         _create_role_profile(user, db)
@@ -440,6 +630,21 @@ def firebase_phone_login(payload: FirebasePhoneLoginRequest, db: Session = Depen
             user.full_name = payload.full_name
         if not user.is_email_verified:
             user.is_email_verified = True
+        if requested_role == "teacher" and user.role == "student":
+            if not payload.teacher_declaration_accepted:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Teacher payout declaration consent is required.",
+                )
+            user.role = "teacher"
+            _set_teacher_declaration_fields(
+                user,
+                request=None,
+                declaration_version=payload.teacher_declaration_version,
+            )
+            _ensure_teacher_profile_exists(user, db)
+        elif user.role == "teacher":
+            _ensure_teacher_profile_exists(user, db)
 
     user.last_login_at = datetime.now(timezone.utc)
     response = _build_token_response(user, db)
@@ -486,9 +691,28 @@ def logout(payload: LogoutRequest, db: Session = Depends(get_db)):
 
 # Google OAuth
 @router.get("/google", summary="Redirect to Google OAuth")
-def google_login(mode: str = "web"):
+def google_login(
+    mode: str = "web",
+    role: str | None = None,
+    teacher_declaration_accepted: bool = False,
+    teacher_declaration_version: str | None = None,
+):
     _ensure_google_oauth_configured()
-    state = "json" if (mode or "").strip().lower() == "json" else "web"
+    oauth_mode = "json" if (mode or "").strip().lower() == "json" else "web"
+    desired_role = (role or "student").strip().lower()
+    if desired_role not in {"student", "teacher"}:
+        raise HTTPException(status_code=422, detail="Role must be 'student' or 'teacher'.")
+    if desired_role == "teacher" and not teacher_declaration_accepted:
+        raise HTTPException(
+            status_code=400,
+            detail="Teacher payout declaration consent is required.",
+        )
+    state_payload = _build_google_state_payload(
+        mode=oauth_mode,
+        role=desired_role,
+        teacher_declaration_accepted=teacher_declaration_accepted,
+        teacher_declaration_version=teacher_declaration_version,
+    )
     params = {
         "client_id": settings.google_client_id,
         "redirect_uri": settings.google_redirect_uri,
@@ -496,15 +720,24 @@ def google_login(mode: str = "web"):
         "scope": "openid email profile",
         "access_type": "offline",
         "prompt": "select_account",
-        "state": state,
+        "state": state_payload,
     }
     qs = urlencode(params)
     return RedirectResponse(url=f"https://accounts.google.com/o/oauth2/v2/auth?{qs}")
 
 
 @router.get("/google/callback", response_model=GoogleCallbackResponse, summary="Google OAuth callback")
-def google_callback(code: str, state: str | None = None, db: Session = Depends(get_db)):
+def google_callback(
+    request: Request,
+    code: str,
+    state: str | None = None,
+    db: Session = Depends(get_db),
+):
     _ensure_google_oauth_configured()
+    state_data = _parse_google_state_payload(state)
+    role_intent = state_data["role"]
+    role_teacher_consent = bool(state_data["teacher_declaration_accepted"])
+    role_teacher_version = state_data.get("teacher_declaration_version")
     try:
         with httpx.Client() as client:
             token_resp = client.post("https://oauth2.googleapis.com/token", data={
@@ -539,14 +772,40 @@ def google_callback(code: str, state: str | None = None, db: Session = Depends(g
             user.google_id = google_id
         if not user.avatar_url and avatar_url:
             user.avatar_url = avatar_url
+        if user.role == "student" and role_intent == "teacher":
+            if not role_teacher_consent:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Teacher payout declaration consent is required.",
+                )
+            user.role = "teacher"
+            _set_teacher_declaration_fields(
+                user,
+                request=request,
+                declaration_version=role_teacher_version,
+            )
+            _ensure_teacher_profile_exists(user, db)
+        elif user.role == "teacher":
+            _ensure_teacher_profile_exists(user, db)
         user.last_login_at = datetime.now(timezone.utc)
     else:
+        if role_intent == "teacher" and not role_teacher_consent:
+            raise HTTPException(
+                status_code=400,
+                detail="Teacher payout declaration consent is required.",
+            )
         is_new_user = True
         user = User(
             email=email, full_name=full_name, avatar_url=avatar_url,
-            google_id=google_id, role="student", auth_provider="google",
+            google_id=google_id, role=role_intent, auth_provider="google",
             is_active=True, is_email_verified=True,
         )
+        if role_intent == "teacher":
+            _set_teacher_declaration_fields(
+                user,
+                request=request,
+                declaration_version=role_teacher_version,
+            )
         db.add(user)
         db.flush()
         _create_role_profile(user, db)
@@ -572,6 +831,6 @@ def google_callback(code: str, state: str | None = None, db: Session = Depends(g
         is_subscribed=marks["is_subscribed"],
         is_verified_teacher=marks["is_verified_teacher"],
     )
-    if (state or "web").strip().lower() == "json":
+    if state_data["mode"] == "json":
         return response_payload
     return _oauth_success_html(response_payload.model_dump(mode="json"))

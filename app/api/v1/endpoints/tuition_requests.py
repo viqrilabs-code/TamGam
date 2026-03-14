@@ -62,12 +62,7 @@ def _is_subscribed(user_id: UUID, db: Session) -> bool:
 
 
 def _teacher_commission_rate(total_revenue_paise: int) -> float:
-    total_rupees = (total_revenue_paise or 0) / 100
-    if total_rupees <= 50000:
-        return 20.0
-    if total_rupees <= 200000:
-        return 15.0
-    return 10.0
+    return 5.0
 
 
 def _sync_due_unenrollments(db: Session, *, student_profile_id: UUID | None = None, teacher_id: UUID | None = None) -> None:
@@ -295,7 +290,7 @@ def init_batch_payment(
             message="This batch currently has no fee configured.",
         )
 
-    has_keys = bool(settings.razorpay_key_id and settings.razorpay_key_secret)
+    has_keys = razorpay_service.has_credentials()
     if not has_keys:
         return BatchPaymentInitResponse(
             payment_link="https://rzp.io/mock-checkout",

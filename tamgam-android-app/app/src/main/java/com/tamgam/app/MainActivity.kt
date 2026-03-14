@@ -16,6 +16,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.ProgressBar
 import android.widget.TextView
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.textfield.TextInputEditText
@@ -247,6 +248,15 @@ class MainActivity : AppCompatActivity() {
         verifyOtpButton.setOnClickListener {
             verifyOtpCode()
         }
+
+        onBackPressedDispatcher.addCallback(
+            this,
+            object : OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() {
+                    handleBackNavigation()
+                }
+            },
+        )
 
         loadLandingPage()
     }
@@ -660,15 +670,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    override fun onBackPressed() {
+    private fun handleBackNavigation() {
         if (phoneAuthContainer.visibility == View.VISIBLE) {
-            super.onBackPressed()
+            finish()
             return
         }
         if (webView.canGoBack()) {
             webView.goBack()
         } else {
-            super.onBackPressed()
+            finish()
         }
     }
 

@@ -75,17 +75,64 @@ def _format_razorpay_error(exc: Exception) -> str:
 
 def _teacher_commission_rate(total_revenue_paise: int) -> float:
     """
-    Commission tiers for teacher income:
-      up to Rs 25,000      -> 25%
-      Rs 25,001-75,000     -> 20%
-      above Rs 75,000      -> 15%
+    Promotional flat commission for teacher income.
     """
-    total_rupees = (total_revenue_paise or 0) / 100
-    if total_rupees <= 25000:
-        return 25.0
-    if total_rupees <= 75000:
-        return 20.0
-    return 15.0
+    return 5.0
+
+
+def _create_or_update_razorpay_plan_mapping(
+    *,
+    plan: Plan,
+    billing_cycle: str,
+    amount_paise: int,
+    db: Session,
+) -> str:
+    period = "yearly" if billing_cycle == "annual" else "monthly"
+    created_plan = razorpay_service.create_plan(
+        name=f"tamgam {plan.name} ({billing_cycle})",
+        amount_paise=amount_paise,
+        period=period,
+        interval=1,
+        description=plan.description or f"{plan.name} {billing_cycle} subscription",
+    )
+    razorpay_plan_id = str(created_plan.get("id") or "").strip()
+    if not razorpay_plan_id:
+        raise RuntimeError("Razorpay plan creation returned an empty plan id.")
+    if billing_cycle == "annual":
+        plan.razorpay_plan_id_annual = razorpay_plan_id
+    else:
+        plan.razorpay_plan_id_monthly = razorpay_plan_id
+    db.flush()
+    return razorpay_plan_id
+
+
+def _is_plan_mapping_error(exc: Exception) -> bool:
+    text = _format_razorpay_error(exc).lower()
+    indicators = (
+        "id provided does not exist",
+        "does not exist",
+        "not exist",
+        "invalid",
+        "invalid id",
+        "entity not found",
+        "no such",
+        "bad request",
+        "plan_id",
+        "plan",
+    )
+    return any(token in text for token in indicators)
+
+
+def _is_subscription_not_found_error(exc: Exception) -> bool:
+    text = _format_razorpay_error(exc).lower()
+    indicators = (
+        "id provided does not exist",
+        "does not exist",
+        "entity not found",
+        "no such",
+        "invalid id",
+    )
+    return any(token in text for token in indicators)
 
 
 def _epoch_to_utc(value) -> datetime | None:
@@ -95,6 +142,73 @@ def _epoch_to_utc(value) -> datetime | None:
         return datetime.fromtimestamp(int(value), tz=timezone.utc)
     except Exception:
         return None
+
+
+def _sync_subscription_from_razorpay(subscription: Subscription, db: Session) -> bool:
+    """
+    Best-effort pull sync for subscription status when webhook delivery is delayed/missed.
+    Returns True if local subscription fields were updated.
+    """
+    if not subscription or not subscription.razorpay_subscription_id:
+        return False
+    if str(subscription.razorpay_subscription_id).startswith("sub_mock_"):
+        return False
+    if not razorpay_service.has_credentials():
+        return False
+
+    try:
+        rz_sub = razorpay_service.fetch_subscription(subscription.razorpay_subscription_id)
+    except Exception as exc:
+        if _is_subscription_not_found_error(exc):
+            subscription.status = "expired"
+            subscription.cancelled_at = datetime.now(timezone.utc)
+            db.commit()
+            db.refresh(subscription)
+            logger.warning(
+                "subscription_sync_marked_expired razorpay_subscription_id=%s error=%s",
+                subscription.razorpay_subscription_id,
+                _format_razorpay_error(exc),
+            )
+            return True
+        logger.warning(
+            "subscription_sync_pull_failed razorpay_subscription_id=%s error=%s",
+            subscription.razorpay_subscription_id,
+            _format_razorpay_error(exc),
+        )
+        return False
+
+    if not isinstance(rz_sub, dict):
+        return False
+
+    changed = False
+    mapped_status = razorpay_service.map_status(str(rz_sub.get("status") or ""))
+    if mapped_status and subscription.status != mapped_status:
+        subscription.status = mapped_status
+        changed = True
+
+    current_start = _epoch_to_utc(rz_sub.get("current_start"))
+    current_end = _epoch_to_utc(rz_sub.get("current_end"))
+    if current_start and subscription.current_period_start != current_start:
+        subscription.current_period_start = current_start
+        changed = True
+    if current_end and subscription.current_period_end != current_end:
+        subscription.current_period_end = current_end
+        changed = True
+
+    if mapped_status == "cancelled" and subscription.cancel_at_period_end:
+        subscription.cancel_at_period_end = False
+        changed = True
+
+    if changed:
+        db.commit()
+        db.refresh(subscription)
+        logger.info(
+            "subscription_sync_pull_updated razorpay_subscription_id=%s status=%s",
+            subscription.razorpay_subscription_id,
+            subscription.status,
+        )
+
+    return changed
 
 
 def _format_amount_inr(amount_paise: int) -> str:
@@ -412,15 +526,19 @@ def get_my_subscription(
         )
     ).order_by(Subscription.created_at.desc()).first()
 
-    active_effective_subs = get_effective_active_subscriptions(current_user.id, db)
-
     if not subscription:
+        active_effective_subs = get_effective_active_subscriptions(current_user.id, db)
         return SubscriptionStatusResponse(
             is_subscribed=False,
             active_subscription_count=len(active_effective_subs),
         )
 
     sub, plan = subscription
+    # Fallback sync from Razorpay if webhook has not updated us yet.
+    if sub.status in ("pending", "past_due"):
+        _sync_subscription_from_razorpay(sub, db)
+
+    active_effective_subs = get_effective_active_subscriptions(current_user.id, db)
     effective_active = get_effective_active_subscription(current_user.id, db)
     return SubscriptionStatusResponse(
         is_subscribed=effective_active is not None,
@@ -476,6 +594,9 @@ def create_subscription(
     if plan.slug != "teacher-platform":
         raise HTTPException(status_code=400, detail="Only teacher platform billing plan is supported.")
 
+    has_razorpay_keys = razorpay_service.has_credentials()
+    razorpay_key_id = razorpay_service.get_public_key_id() if has_razorpay_keys else None
+
     ongoing_subs = db.query(Subscription).filter(
         and_(
             Subscription.user_id == current_user.id,
@@ -484,10 +605,86 @@ def create_subscription(
     ).order_by(Subscription.created_at.desc()).all()
 
     if ongoing_subs:
-        raise HTTPException(
-            status_code=409,
-            detail="You already have an active or pending billing subscription.",
-        )
+        # Best-effort status refresh before deciding whether to block/resume.
+        for sub in ongoing_subs:
+            if sub.status in ("pending", "past_due"):
+                _sync_subscription_from_razorpay(sub, db)
+
+        ongoing_subs = db.query(Subscription).filter(
+            and_(
+                Subscription.user_id == current_user.id,
+                Subscription.status.in_(("active", "pending", "past_due")),
+            )
+        ).order_by(Subscription.created_at.desc()).all()
+
+        active_sub = next((s for s in ongoing_subs if s.status == "active"), None)
+        if active_sub:
+            raise HTTPException(
+                status_code=409,
+                detail="You already have an active billing subscription.",
+            )
+
+        resume_sub = next((s for s in ongoing_subs if s.status in ("pending", "past_due")), None)
+        if resume_sub:
+            resume_plan = db.query(Plan).filter(Plan.id == resume_sub.plan_id).first() or plan
+            amount_paise = (
+                resume_plan.price_annual_paise
+                if resume_sub.billing_cycle == "annual"
+                else resume_plan.price_monthly_paise
+            )
+            payment_link = ""
+            rz_sub_id = str(resume_sub.razorpay_subscription_id or "").strip()
+            if rz_sub_id.startswith("sub_mock_"):
+                payment_link = "https://rzp.io/mock-checkout (configure Razorpay keys to use real checkout)"
+            if has_razorpay_keys and rz_sub_id and not rz_sub_id.startswith("sub_mock_"):
+                try:
+                    rz_sub = razorpay_service.fetch_subscription(rz_sub_id)
+                    remote_status = razorpay_service.map_status(str(rz_sub.get("status") or ""))
+                    if remote_status and remote_status != resume_sub.status:
+                        resume_sub.status = remote_status
+                        db.commit()
+                        db.refresh(resume_sub)
+                    if resume_sub.status in ("pending", "past_due"):
+                        payment_link = str(rz_sub.get("short_url") or "").strip()
+                except Exception as exc:
+                    if _is_subscription_not_found_error(exc):
+                        # Stale mapping after Razorpay account/key rotation.
+                        # Mark local record inactive so we can create a fresh subscription.
+                        logger.warning(
+                            "create_subscription stale_pending_subscription user_id=%s subscription_id=%s razorpay_subscription_id=%s error=%s",
+                            current_user.id,
+                            resume_sub.id,
+                            rz_sub_id,
+                            _format_razorpay_error(exc),
+                        )
+                        resume_sub.status = "expired"
+                        resume_sub.cancelled_at = datetime.now(timezone.utc)
+                        db.commit()
+                        db.refresh(resume_sub)
+                    else:
+                        logger.warning(
+                            "create_subscription resume_fetch_failed user_id=%s razorpay_subscription_id=%s error=%s",
+                            current_user.id,
+                            rz_sub_id,
+                            _format_razorpay_error(exc),
+                        )
+
+            if resume_sub.status in ("pending", "past_due"):
+                logger.info(
+                    "create_subscription resume_existing user_id=%s subscription_id=%s status=%s",
+                    current_user.id,
+                    resume_sub.id,
+                    resume_sub.status,
+                )
+                return CreateSubscriptionResponse(
+                    subscription_id=resume_sub.id,
+                    razorpay_subscription_id=str(resume_sub.razorpay_subscription_id or ""),
+                    payment_link=payment_link,
+                    razorpay_key_id=razorpay_key_id,
+                    plan_name=resume_plan.name,
+                    amount_paise=amount_paise,
+                    billing_cycle=resume_sub.billing_cycle,
+                )
 
     # Pick correct Razorpay plan ID and amount
     if payload.billing_cycle == "annual":
@@ -499,23 +696,14 @@ def create_subscription(
         amount_paise = plan.price_monthly_paise
         total_count = 12  # Monthly = up to 12 cycles
 
-    has_razorpay_keys = bool(razorpay_service.settings.razorpay_key_id and razorpay_service.settings.razorpay_key_secret)
     if has_razorpay_keys and not razorpay_plan_id:
         try:
-            period = "yearly" if payload.billing_cycle == "annual" else "monthly"
-            created_plan = razorpay_service.create_plan(
-                name=f"tamgam {plan.name} ({payload.billing_cycle})",
+            razorpay_plan_id = _create_or_update_razorpay_plan_mapping(
+                plan=plan,
+                billing_cycle=payload.billing_cycle,
                 amount_paise=amount_paise,
-                period=period,
-                interval=1,
-                description=plan.description or f"{plan.name} {payload.billing_cycle} subscription",
+                db=db,
             )
-            razorpay_plan_id = created_plan.get("id")
-            if payload.billing_cycle == "annual":
-                plan.razorpay_plan_id_annual = razorpay_plan_id
-            else:
-                plan.razorpay_plan_id_monthly = razorpay_plan_id
-            db.flush()
             logger.info(
                 "create_subscription razorpay_plan_bootstrapped plan_slug=%s billing_cycle=%s razorpay_plan_id=%s",
                 plan.slug,
@@ -566,6 +754,7 @@ def create_subscription(
             subscription_id=subscription.id,
             razorpay_subscription_id=mock_razorpay_id,
             payment_link="https://rzp.io/mock-checkout (configure Razorpay keys to use real checkout)",
+            razorpay_key_id=razorpay_key_id,
             plan_name=plan.name,
             amount_paise=amount_paise,
             billing_cycle=payload.billing_cycle,
@@ -578,16 +767,59 @@ def create_subscription(
             total_count=total_count,
         )
     except Exception as e:
-        logger.exception(
-            "create_subscription razorpay_failed user_id=%s plan_id=%s error=%s",
-            current_user.id,
-            plan.id,
-            _format_razorpay_error(e),
-        )
-        raise HTTPException(
-            status_code=502,
-            detail=f"Failed to create Razorpay subscription: {_format_razorpay_error(e)}",
-        )
+        # Common after key/account rotation: DB stores plan_id from previous Razorpay account.
+        if has_razorpay_keys and razorpay_plan_id and _is_plan_mapping_error(e):
+            logger.warning(
+                "create_subscription stale_plan_mapping_detected user_id=%s plan_id=%s billing_cycle=%s existing_razorpay_plan_id=%s error=%s",
+                current_user.id,
+                plan.id,
+                payload.billing_cycle,
+                razorpay_plan_id,
+                _format_razorpay_error(e),
+            )
+            try:
+                razorpay_plan_id = _create_or_update_razorpay_plan_mapping(
+                    plan=plan,
+                    billing_cycle=payload.billing_cycle,
+                    amount_paise=amount_paise,
+                    db=db,
+                )
+                logger.info(
+                    "create_subscription razorpay_plan_rebound plan_slug=%s billing_cycle=%s razorpay_plan_id=%s",
+                    plan.slug,
+                    payload.billing_cycle,
+                    razorpay_plan_id,
+                )
+                rz_sub = razorpay_service.create_subscription(
+                    razorpay_plan_id=razorpay_plan_id,
+                    total_count=total_count,
+                )
+            except Exception as retry_exc:
+                logger.exception(
+                    "create_subscription razorpay_retry_failed user_id=%s plan_id=%s billing_cycle=%s error=%s",
+                    current_user.id,
+                    plan.id,
+                    payload.billing_cycle,
+                    _format_razorpay_error(retry_exc),
+                )
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        "Failed to create Razorpay subscription after refreshing plan mapping: "
+                        f"{_format_razorpay_error(retry_exc)}"
+                    ),
+                )
+        else:
+            logger.exception(
+                "create_subscription razorpay_failed user_id=%s plan_id=%s error=%s",
+                current_user.id,
+                plan.id,
+                _format_razorpay_error(e),
+            )
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to create Razorpay subscription: {_format_razorpay_error(e)}",
+            )
 
     subscription = Subscription(
         user_id=current_user.id,
@@ -609,6 +841,7 @@ def create_subscription(
         subscription_id=subscription.id,
         razorpay_subscription_id=rz_sub["id"],
         payment_link=rz_sub.get("short_url", ""),
+        razorpay_key_id=razorpay_key_id,
         plan_name=plan.name,
         amount_paise=amount_paise,
         billing_cycle=payload.billing_cycle,
@@ -646,7 +879,7 @@ def cancel_subscription(
     cancelled_via_razorpay = False
     local_warning = ""
     if subscription.razorpay_subscription_id and not subscription.razorpay_subscription_id.startswith("sub_mock_"):
-        has_keys = bool(settings.razorpay_key_id and settings.razorpay_key_secret)
+        has_keys = razorpay_service.has_credentials()
         if not has_keys and settings.app_env == "production":
             raise HTTPException(
                 status_code=503,
@@ -759,8 +992,8 @@ async def razorpay_webhook(
     """
     Handles Razorpay webhook events.
     Must be registered in Razorpay dashboard:
-      URL: https://your-domain/api/v1/subscriptions/webhook
-      Events: subscription.*, payment.captured
+      URL: https://tamgam.in/api/v1/subscriptions/webhook
+      Events: subscription.*, payment.captured, payment.failed
 
     CRITICAL: Verify signature before processing any event.
     Status is NEVER set manually -- only updated via this webhook.
@@ -781,16 +1014,19 @@ async def razorpay_webhook(
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON payload.")
 
-    event_type = event.get("event")
+    event_type = str(event.get("event") or "").strip()
     logger.info("razorpay_webhook event=%s", event_type)
-    if event_type not in razorpay_service.HANDLED_EVENTS:
+    payload = event.get("payload", {}) or {}
+    is_subscription_event = event_type.startswith("subscription.")
+    if not (
+        is_subscription_event
+        or event_type in razorpay_service.HANDLED_EVENTS
+    ):
+        logger.info("razorpay_webhook ignored_event=%s", event_type)
         return WebhookResponse(received=True)
 
-    # Extract subscription ID from event payload
-    payload = event.get("payload", {})
-
     # Handle subscription events
-    if event_type.startswith("subscription."):
+    if is_subscription_event:
         rz_sub = payload.get("subscription", {}).get("entity", {})
         rz_sub_id = rz_sub.get("id")
         if not rz_sub_id:
@@ -827,6 +1063,46 @@ async def razorpay_webhook(
             subscription.status,
         )
 
+    # Handle payment.failed -- mark linked subscription as past_due
+    elif event_type == "payment.failed":
+        rz_payment = payload.get("payment", {}).get("entity", {})
+        rz_sub_id = rz_payment.get("subscription_id")
+        if not rz_sub_id:
+            return WebhookResponse(received=True)
+
+        subscription = db.query(Subscription).filter(
+            Subscription.razorpay_subscription_id == rz_sub_id
+        ).first()
+        if not subscription:
+            return WebhookResponse(received=True)
+
+        if subscription.status != "cancelled":
+            subscription.status = "past_due"
+            payment_id = str(rz_payment.get("id") or "").strip()
+            if payment_id:
+                existing_failed_payment = db.query(Payment).filter(
+                    Payment.razorpay_payment_id == payment_id
+                ).first()
+                if not existing_failed_payment:
+                    amount_paise = int(rz_payment.get("amount") or 0)
+                    gst_paise = int(amount_paise * 18 / 118) if amount_paise > 0 else 0
+                    db.add(Payment(
+                        user_id=subscription.user_id,
+                        subscription_id=subscription.id,
+                        amount_paise=amount_paise,
+                        gst_paise=gst_paise,
+                        status="failed",
+                        razorpay_payment_id=payment_id,
+                        razorpay_order_id=rz_payment.get("order_id"),
+                        webhook_payload=rz_payment,
+                    ))
+            db.commit()
+        logger.warning(
+            "razorpay_webhook payment_failed razorpay_subscription_id=%s razorpay_payment_id=%s",
+            rz_sub_id,
+            rz_payment.get("id"),
+        )
+
     # Handle payment.captured -- record payment
     elif event_type == "payment.captured":
         rz_payment = payload.get("payment", {}).get("entity", {})
@@ -860,6 +1136,9 @@ async def razorpay_webhook(
                 webhook_payload=rz_payment,
             )
             db.add(payment)
+            # Fallback: payment capture implies recurring subscription is active.
+            if subscription.status != "cancelled":
+                subscription.status = "active"
             db.commit()
             logger.info(
                 "razorpay_webhook payment_recorded razorpay_payment_id=%s subscription_id=%s amount_paise=%s",

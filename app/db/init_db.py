@@ -51,24 +51,22 @@ def seed_admin(db) -> None:
 
 def seed_plans(db) -> None:
     """Create/update default billing plans (teacher-only)."""
-    # Platform fee X is set to Rs 250/month.
-    # Break-even assumption used:
-    #   - 10 teachers, 5 students each (50 students total)
-    #   - Hosting estimate near 50 students: ~Rs 9,500/month (README baseline)
-    #   - Expected commission at low-income tier from current baseline pricing contributes ~Rs 6,990
-    #   - Required fixed fee per teacher ~= (9,500 - 6,990) / 10 = Rs 251 -> rounded to Rs 250
+    # Promotional offer:
+    #   - Flat platform fee: Rs 99/month
+    #   - Flat commission: 5% on teacher revenue
+    # Annual price keeps "2 months free" behavior (10x monthly).
     plans = [
         {
             "name": "Teacher Platform",
             "slug": "teacher-platform",
-            "price_monthly_paise": 25000,
-            "price_annual_paise": 250000,
+            "price_monthly_paise": 9900,
+            "price_annual_paise": 99000,
             "subjects_allowed": -1,
-            "description": "Teacher billing plan: monthly platform fee + dynamic commission (20% / 15% / 10%).",
+            "description": "Teacher billing plan: monthly platform fee + flat 5% commission.",
             "features": [
                 "Students are free on tamgam",
-                "Platform fee: Rs 250/month",
-                "Dynamic commission on teacher income: 20% / 15% / 10%",
+                "Platform fee: Rs 99/month",
+                "Flat commission on teacher income: 5%",
                 "Tuition requests and enrollments",
                 "AI notes, Diya tutor, and assessments included",
             ],
@@ -79,8 +77,17 @@ def seed_plans(db) -> None:
     for plan_data in plans:
         existing = db.query(Plan).filter(Plan.slug == plan_data["slug"]).first()
         if existing:
+            price_changed = (
+                int(existing.price_monthly_paise or 0) != int(plan_data["price_monthly_paise"]) or
+                int(existing.price_annual_paise or 0) != int(plan_data["price_annual_paise"])
+            )
             for k, v in plan_data.items():
                 setattr(existing, k, v)
+            if price_changed:
+                # Force fresh Razorpay plans so old account/amount mappings do not break checkout.
+                existing.razorpay_plan_id_monthly = None
+                existing.razorpay_plan_id_annual = None
+                print("  Razorpay plan IDs reset due to pricing change.")
             existing.is_active = True
             print(f"  Plan updated: {plan_data['name']}")
             continue
