@@ -23,6 +23,7 @@ from app.api.v1.endpoints import (
     admin,
     homework,
     contact,
+    group_studies,
 )
 from app.api.v1.endpoints import tuition_requests
 from app.api.v1.endpoints.admin_books import router as books_router
@@ -62,6 +63,9 @@ api_router.include_router(notifications.router, prefix="/notifications", tags=["
 
 # Homework
 api_router.include_router(homework.router, prefix="/homework", tags=["Homework"])
+
+# Group Study
+api_router.include_router(group_studies.router, prefix="/group-studies", tags=["Group Study"])
 
 # Contact / Complaints
 api_router.include_router(contact.router, prefix="/contact", tags=["Contact"])

@@ -168,6 +168,16 @@ def _set_teacher_declaration_fields(
 
 
 def _ensure_teacher_profile_exists(user: User, db: Session) -> None:
+    pending_profile = next(
+        (
+            obj
+            for obj in db.new
+            if isinstance(obj, TeacherProfile) and getattr(obj, "user_id", None) == user.id
+        ),
+        None,
+    )
+    if pending_profile:
+        return
     profile = db.query(TeacherProfile).filter(TeacherProfile.user_id == user.id).first()
     if not profile:
         db.add(TeacherProfile(user_id=user.id))
@@ -239,7 +249,7 @@ def _create_role_profile(user: User, db: Session) -> None:
     if user.role == "student":
         db.add(StudentProfile(user_id=user.id))
     elif user.role == "teacher":
-        db.add(TeacherProfile(user_id=user.id))
+        _ensure_teacher_profile_exists(user, db)
 
 
 def _build_google_state_payload(
